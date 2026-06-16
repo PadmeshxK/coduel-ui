@@ -1,0 +1,15 @@
+import type { Language } from '../types'
+
+/*
+  Languages offered in the editor. The backend currently judges only PYTHON — add entries here
+  as the execution engine gains support (the backend `Language` enum must gain the value too,
+  then add it to the `Language` type in types/index.ts).
+*/
+export const LANGUAGES: { value: Language; label: string }[] = [
+  { value: 'PYTHON', label: 'Python 3.13' },
+]
+
+/** Maps our Language to Monaco's language id (for syntax highlighting). */
+export const MONACO_LANGUAGE: Record<Language, string> = {
+  PYTHON: 'python',
+}

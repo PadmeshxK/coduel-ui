@@ -1,0 +1,361 @@
+@import "tailwindcss";
+
+/* Enable `dark:` utilities keyed off <html data-theme="dark"> (for the few
+   translucent-overlay cases that aren't a straight color-token swap). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+  Coduel design tokens — "Direction A" editorial.
+  These become real utilities automatically (bg-paper, text-accent, font-display…).
+  Because they compile to var(--color-*), overriding the vars under
+  :root[data-theme="dark"] flips the whole UI at runtime.
+*/
+@theme {
+  --color-paper: #f4efe6;
+  --color-paper-2: #ede6d8;
+  --color-ink: #1b1813;
+  --color-ink-soft: #6b6354;
+  --color-line: #d8cfbe;
+  --color-accent: #9e3b2a;
+  --color-accent-2: #2e6b4f;
+  --color-gold: #b8893b;
+
+  --font-display: "Bricolage Grotesque", sans-serif;
+  --font-sans: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Coduel's signature motion curve — a soft, confident ease-out-quint.
+     Exposed as the `ease-fluid` utility AND made the default for every
+     `transition`/`duration` utility so the whole site moves as one. */
+  --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
+  --default-transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  --default-transition-duration: 240ms;
+}
+
+/* Dark palette — same semantic tokens, warm espresso values.
+   :root[data-theme="dark"] outspecifies :root, so order/layers don't matter. */
+:root[data-theme="dark"] {
+  --color-paper: #191410;
+  --color-paper-2: #221a13;
+  --color-ink: #f1e9db;
+  --color-ink-soft: #a2937c;
+  --color-line: #3a3025;
+  --color-accent: #cb5b45;
+  --color-accent-2: #74b394;
+  --color-gold: #cba15c;
+}
+
+/* Lenis smooth scrolling (see useSmoothScroll.ts) — recommended resets so Lenis owns the
+   scroll position cleanly and opted-out regions (data-lenis-prevent) scroll natively. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+/* One global entrance animation, reused everywhere via <Reveal> (and the `animate-reveal`
+   utility): a soft fade + slide on the site's signature easing. Page content, popovers, and
+   cards all inherit the same feel instead of each re-implementing transitions. */
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-reveal {
+  animation: reveal 0.45s var(--ease-fluid) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-reveal {
+    animation: none;
+  }
+}
+
+/* Wordmark logo caret — a blinking terminal cursor after "coduel". Scales with font-size (em). */
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.logo-caret {
+  display: inline-block;
+  width: 0.09em;
+  height: 0.82em;
+  margin-left: 0.14em;
+  transform: translateY(0.08em);
+  background: var(--color-accent);
+  border-radius: 1px;
+  animation: caret-blink 1.1s step-end infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-caret {
+    animation: none;
+  }
+}
+
+/* Brand loader (see Loader.tsx): a comet-tail ring in the accent — echoes the reflective
+   conic-gradient borders — paired with a mono label. One loader for every loading state. */
+@keyframes loader-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+.loader-ring {
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  background: conic-gradient(
+    from 90deg,
+    transparent 0deg,
+    color-mix(in srgb, var(--color-accent) 22%, transparent) 150deg,
+    var(--color-accent) 360deg
+  );
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 3px),
+    #000 calc(100% - 3px)
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 3px),
+    #000 calc(100% - 3px)
+  );
+  animation: loader-spin 0.85s linear infinite;
+}
+
+/* Light ⇄ dark theme transition (see useTheme.ts).
+   Primary — View Transitions: the NEW theme is wiped in over a snapshot of the OLD, left→right
+   behind a soft wavy edge, so the page is literally half-new / half-old mid-sweep. The old snapshot
+   stays static underneath; the new reveals on top. */
+::view-transition-old(root) {
+  animation: none;
+}
+::view-transition-new(root) {
+  /* Easing is baked into the sampled keyframes below (gentle ease-out for position), so the timing
+     is linear. The wave decelerates visibly while still wavy, finishes on-screen (minimal
+     overshoot), then flattens — no long off-screen crawl / dead tail. */
+  animation: coduel-theme-wipe 0.6s linear;
+}
+/* Position eases out (fast→slow, spread across the whole sweep); amplitude holds full until ~55%
+   then flattens to a straight edge. Decoupling the two keeps the slow-down visible on a wavy edge. */
+@keyframes coduel-theme-wipe {
+  0% { clip-path: polygon(-14.00% 0.00%, -10.75% 3.33%, -8.05% 6.67%, -6.39% 10.00%, -6.04% 13.33%, -7.07% 16.67%, -9.30% 20.00%, -12.34% 23.33%, -15.66% 26.67%, -18.70% 30.00%, -20.93% 33.33%, -21.96% 36.67%, -21.61% 40.00%, -19.95% 43.33%, -17.25% 46.67%, -14.00% 50.00%, -10.75% 53.33%, -8.05% 56.67%, -6.39% 60.00%, -6.04% 63.33%, -7.07% 66.67%, -9.30% 70.00%, -12.34% 73.33%, -15.66% 76.67%, -18.70% 80.00%, -20.93% 83.33%, -21.96% 86.67%, -21.61% 90.00%, -19.95% 93.33%, -17.25% 96.67%, -14.00% 100.00%, 0% 100%, 0% 0%); }
+  10% { clip-path: polygon(7.85% 0.00%, 11.10% 3.33%, 13.80% 6.67%, 15.46% 10.00%, 15.81% 13.33%, 14.78% 16.67%, 12.55% 20.00%, 9.51% 23.33%, 6.19% 26.67%, 3.15% 30.00%, 0.92% 33.33%, -0.11% 36.67%, 0.24% 40.00%, 1.90% 43.33%, 4.60% 46.67%, 7.85% 50.00%, 11.10% 53.33%, 13.80% 56.67%, 15.46% 60.00%, 15.81% 63.33%, 14.78% 66.67%, 12.55% 70.00%, 9.51% 73.33%, 6.19% 76.67%, 3.15% 80.00%, 0.92% 83.33%, -0.11% 86.67%, 0.24% 90.00%, 1.90% 93.33%, 4.60% 96.67%, 7.85% 100.00%, 0% 100%, 0% 0%); }
+  20% { clip-path: polygon(27.40% 0.00%, 30.65% 3.33%, 33.35% 6.67%, 35.01% 10.00%, 35.36% 13.33%, 34.33% 16.67%, 32.10% 20.00%, 29.06% 23.33%, 25.74% 26.67%, 22.70% 30.00%, 20.47% 33.33%, 19.44% 36.67%, 19.79% 40.00%, 21.45% 43.33%, 24.15% 46.67%, 27.40% 50.00%, 30.65% 53.33%, 33.35% 56.67%, 35.01% 60.00%, 35.36% 63.33%, 34.33% 66.67%, 32.10% 70.00%, 29.06% 73.33%, 25.74% 76.67%, 22.70% 80.00%, 20.47% 83.33%, 19.44% 86.67%, 19.79% 90.00%, 21.45% 93.33%, 24.15% 96.67%, 27.40% 100.00%, 0% 100%, 0% 0%); }
+  30% { clip-path: polygon(44.65% 0.00%, 47.90% 3.33%, 50.60% 6.67%, 52.26% 10.00%, 52.61% 13.33%, 51.58% 16.67%, 49.35% 20.00%, 46.31% 23.33%, 42.99% 26.67%, 39.95% 30.00%, 37.72% 33.33%, 36.69% 36.67%, 37.04% 40.00%, 38.70% 43.33%, 41.40% 46.67%, 44.65% 50.00%, 47.90% 53.33%, 50.60% 56.67%, 52.26% 60.00%, 52.61% 63.33%, 51.58% 66.67%, 49.35% 70.00%, 46.31% 73.33%, 42.99% 76.67%, 39.95% 80.00%, 37.72% 83.33%, 36.69% 86.67%, 37.04% 90.00%, 38.70% 93.33%, 41.40% 96.67%, 44.65% 100.00%, 0% 100%, 0% 0%); }
+  40% { clip-path: polygon(59.60% 0.00%, 62.85% 3.33%, 65.55% 6.67%, 67.21% 10.00%, 67.56% 13.33%, 66.53% 16.67%, 64.30% 20.00%, 61.26% 23.33%, 57.94% 26.67%, 54.90% 30.00%, 52.67% 33.33%, 51.64% 36.67%, 51.99% 40.00%, 53.65% 43.33%, 56.35% 46.67%, 59.60% 50.00%, 62.85% 53.33%, 65.55% 56.67%, 67.21% 60.00%, 67.56% 63.33%, 66.53% 66.67%, 64.30% 70.00%, 61.26% 73.33%, 57.94% 76.67%, 54.90% 80.00%, 52.67% 83.33%, 51.64% 86.67%, 51.99% 90.00%, 53.65% 93.33%, 56.35% 96.67%, 59.60% 100.00%, 0% 100%, 0% 0%); }
+  50% { clip-path: polygon(72.25% 0.00%, 75.50% 3.33%, 78.20% 6.67%, 79.86% 10.00%, 80.21% 13.33%, 79.18% 16.67%, 76.95% 20.00%, 73.91% 23.33%, 70.59% 26.67%, 67.55% 30.00%, 65.32% 33.33%, 64.29% 36.67%, 64.64% 40.00%, 66.30% 43.33%, 69.00% 46.67%, 72.25% 50.00%, 75.50% 53.33%, 78.20% 56.67%, 79.86% 60.00%, 80.21% 63.33%, 79.18% 66.67%, 76.95% 70.00%, 73.91% 73.33%, 70.59% 76.67%, 67.55% 80.00%, 65.32% 83.33%, 64.29% 86.67%, 64.64% 90.00%, 66.30% 93.33%, 69.00% 96.67%, 72.25% 100.00%, 0% 100%, 0% 0%); }
+  60% { clip-path: polygon(82.60% 0.00%, 85.49% 3.33%, 87.88% 6.67%, 89.36% 10.00%, 89.67% 13.33%, 88.76% 16.67%, 86.78% 20.00%, 84.08% 23.33%, 81.12% 26.67%, 78.42% 30.00%, 76.44% 33.33%, 75.53% 36.67%, 75.84% 40.00%, 77.32% 43.33%, 79.71% 46.67%, 82.60% 50.00%, 85.49% 53.33%, 87.88% 56.67%, 89.36% 60.00%, 89.67% 63.33%, 88.76% 66.67%, 86.78% 70.00%, 84.08% 73.33%, 81.12% 76.67%, 78.42% 80.00%, 76.44% 83.33%, 75.53% 86.67%, 75.84% 90.00%, 77.32% 93.33%, 79.71% 96.67%, 82.60% 100.00%, 0% 100%, 0% 0%); }
+  70% { clip-path: polygon(90.65% 0.00%, 92.82% 3.33%, 94.61% 6.67%, 95.72% 10.00%, 95.95% 13.33%, 95.27% 16.67%, 93.78% 20.00%, 91.76% 23.33%, 89.54% 26.67%, 87.52% 30.00%, 86.03% 33.33%, 85.35% 36.67%, 85.58% 40.00%, 86.69% 43.33%, 88.48% 46.67%, 90.65% 50.00%, 92.82% 53.33%, 94.61% 56.67%, 95.72% 60.00%, 95.95% 63.33%, 95.27% 66.67%, 93.78% 70.00%, 91.76% 73.33%, 89.54% 76.67%, 87.52% 80.00%, 86.03% 83.33%, 85.35% 86.67%, 85.58% 90.00%, 86.69% 93.33%, 88.48% 96.67%, 90.65% 100.00%, 0% 100%, 0% 0%); }
+  80% { clip-path: polygon(96.40% 0.00%, 97.85% 3.33%, 99.04% 6.67%, 99.78% 10.00%, 99.94% 13.33%, 99.48% 16.67%, 98.49% 20.00%, 97.14% 23.33%, 95.66% 26.67%, 94.31% 30.00%, 93.32% 33.33%, 92.86% 36.67%, 93.02% 40.00%, 93.76% 43.33%, 94.95% 46.67%, 96.40% 50.00%, 97.85% 53.33%, 99.04% 56.67%, 99.78% 60.00%, 99.94% 63.33%, 99.48% 66.67%, 98.49% 70.00%, 97.14% 73.33%, 95.66% 76.67%, 94.31% 80.00%, 93.32% 83.33%, 92.86% 86.67%, 93.02% 90.00%, 93.76% 93.33%, 94.95% 96.67%, 96.40% 100.00%, 0% 100%, 0% 0%); }
+  90% { clip-path: polygon(99.85% 0.00%, 100.57% 3.33%, 101.17% 6.67%, 101.54% 10.00%, 101.62% 13.33%, 101.39% 16.67%, 100.89% 20.00%, 100.22% 23.33%, 99.48% 26.67%, 98.81% 30.00%, 98.31% 33.33%, 98.08% 36.67%, 98.16% 40.00%, 98.53% 43.33%, 99.13% 46.67%, 99.85% 50.00%, 100.57% 53.33%, 101.17% 56.67%, 101.54% 60.00%, 101.62% 63.33%, 101.39% 66.67%, 100.89% 70.00%, 100.22% 73.33%, 99.48% 76.67%, 98.81% 80.00%, 98.31% 83.33%, 98.08% 86.67%, 98.16% 90.00%, 98.53% 93.33%, 99.13% 96.67%, 99.85% 100.00%, 0% 100%, 0% 0%); }
+  100% { clip-path: polygon(101.00% 0.00%, 101.00% 3.33%, 101.00% 6.67%, 101.00% 10.00%, 101.00% 13.33%, 101.00% 16.67%, 101.00% 20.00%, 101.00% 23.33%, 101.00% 26.67%, 101.00% 30.00%, 101.00% 33.33%, 101.00% 36.67%, 101.00% 40.00%, 101.00% 43.33%, 101.00% 46.67%, 101.00% 50.00%, 101.00% 53.33%, 101.00% 56.67%, 101.00% 60.00%, 101.00% 63.33%, 101.00% 66.67%, 101.00% 70.00%, 101.00% 73.33%, 101.00% 76.67%, 101.00% 80.00%, 101.00% 83.33%, 101.00% 86.67%, 101.00% 90.00%, 101.00% 93.33%, 101.00% 96.67%, 101.00% 100.00%, 0% 100%, 0% 0%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+/* Fallback (browsers without View Transitions): eased colour crossfade while `.theme-anim` is on. */
+.theme-anim,
+.theme-anim *,
+.theme-anim *::before,
+.theme-anim *::after {
+  transition:
+    background-color 0.6s var(--ease-fluid),
+    border-color 0.6s var(--ease-fluid),
+    color 0.6s var(--ease-fluid),
+    fill 0.6s var(--ease-fluid),
+    stroke 0.6s var(--ease-fluid) !important;
+}
+
+@layer base {
+  :root {
+    --grain: #0000000a;
+  }
+  :root[data-theme="dark"] {
+    --grain: #ffffff0a;
+  }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    min-height: 100vh;
+    line-height: 1.5;
+    background-image: radial-gradient(var(--grain) 1px, transparent 1px);
+    background-size: 4px 4px;
+  }
+  /* Tailwind v4 no longer sets cursor:pointer on buttons by default — restore it
+     for all interactive elements. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  a[href] {
+    cursor: pointer;
+  }
+
+  /* Thin, themed scrollbars — no ugly default chrome bars. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--color-line);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* Animated angle for the reflective border sweep (registered so it can interpolate). */
+@property --reflect-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@layer components {
+  /*
+    .reflective — a glassy border ring on rounded panels. A masked conic-gradient is clipped to a
+    1px ring; a slow light glint (with a warm gold tint) travels the edge. Sits over the base border.
+  */
+  .reflective {
+    position: relative;
+  }
+  .reflective::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+      from var(--reflect-angle),
+      rgba(255, 255, 255, 0.02),
+      rgba(255, 255, 255, 0.16) 12%,
+      color-mix(in srgb, var(--color-gold) 10%, transparent) 25%,
+      rgba(255, 255, 255, 0.02) 42%,
+      rgba(255, 255, 255, 0.02) 62%,
+      rgba(255, 255, 255, 0.12) 80%,
+      rgba(255, 255, 255, 0.02)
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    animation: reflect-spin 9s linear infinite;
+  }
+  /* Dark theme: brighter, warmer glints to read as glass on the espresso surfaces. */
+  :root[data-theme="dark"] .reflective::before {
+    background: conic-gradient(
+      from var(--reflect-angle),
+      rgba(255, 240, 220, 0.03),
+      rgba(255, 245, 230, 0.22) 12%,
+      color-mix(in srgb, var(--color-gold) 16%, transparent) 25%,
+      rgba(255, 240, 220, 0.03) 42%,
+      rgba(255, 240, 220, 0.03) 62%,
+      rgba(255, 245, 230, 0.18) 80%,
+      rgba(255, 240, 220, 0.03)
+    );
+  }
+  /* Cursor-following highlight — the border brightens near the pointer on hover.
+     --mx/--my are set per-element by the global pointermove listener (useReflectiveGlow). */
+  .reflective::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    padding: 1px;
+    background: radial-gradient(
+      110px circle at var(--mx, 50%) var(--my, 50%),
+      rgba(255, 255, 255, 0.32),
+      transparent 70%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 250ms ease;
+  }
+  :root[data-theme="dark"] .reflective::after {
+    background: radial-gradient(
+      110px circle at var(--mx, 50%) var(--my, 50%),
+      rgba(255, 240, 220, 0.42),
+      transparent 70%
+    );
+  }
+  .reflective:hover::after {
+    opacity: 1;
+  }
+  @keyframes reflect-spin {
+    to {
+      --reflect-angle: 360deg;
+    }
+  }
+  /* Premium CTA cue: a soft specular shine glides across the button every few seconds, with a
+     pause between sweeps (à la Magic UI's shimmer). Subtle — keeps the button's own shadow. */
+  .attract {
+    position: relative;
+    overflow: hidden;
+  }
+  .attract::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      115deg,
+      transparent 38%,
+      rgba(255, 255, 255, 0.28) 50%,
+      transparent 62%
+    );
+    transform: translateX(-160%);
+    animation: attract-shine 3.4s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes attract-shine {
+    0% {
+      transform: translateX(-160%);
+    }
+    55%,
+    100% {
+      transform: translateX(160%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reflective::before {
+      animation: none;
+    }
+    .attract::after {
+      animation: none;
+      opacity: 0;
+    }
+  }
+}

@@ -12,7 +12,7 @@ import { useAsync } from '../hooks/useAsync'
 import { useMatchSocket } from '../hooks/useMatchSocket'
 import { useAuth } from '../hooks/useAuth'
 import { VERDICT_LABEL, verdictTone } from '../lib/verdict'
-import type { Language, MatchEventData, Verdict } from '../types'
+import type { Language, MatchEndReason, MatchEventData, Verdict } from '../types'
 
 const fmt = (s: number) =>
   `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
@@ -51,6 +51,7 @@ export function DuelPage() {
   const [progress, setProgress] = useState<Record<number, Progress>>({})
   const [feed, setFeed] = useState<FeedEntry[]>([])
   const [winnerUserId, setWinnerUserId] = useState<number | null>(null)
+  const [endReason, setEndReason] = useState<MatchEndReason | null>(null)
   const [ended, setEnded] = useState(false)
   const [ready, setReady] = useState(false)
   const [started, setStarted] = useState(false)
@@ -147,6 +148,7 @@ export function DuelPage() {
       if (userId === user?.id) setSubmitMsg(null)
     } else if (e.type === 'MATCH_OVER') {
       setWinnerUserId(e.winnerUserId ?? null)
+      setEndReason(e.endReason ?? null)
       setEnded(true)
       setFeed((f) =>
         [{ t: fmt(elapsedAt()), who: '', text: '▸ match over', tone: 'text-gold' }, ...f],
@@ -157,6 +159,35 @@ export function DuelPage() {
   const { connected } = useMatchSocket(matchId, handleEvent)
 
   const matchOver = ended
+
+  // Match-finish banner copy, chosen from the end reason + whether you're the winner / loser /
+  // neither. Falls back to a generic line on reload (GET /matches carries no end reason).
+  const matchOverMessage = (): { text: string; tone: string } => {
+    const youWon = winnerUserId != null && winnerUserId === user?.id
+    switch (endReason) {
+      case 'SOLVED':
+        return youWon
+          ? { text: '🏆 You won — first to solve it!', tone: 'text-accent-2' }
+          : { text: `${opponentName} solved it first.`, tone: 'text-accent' }
+      case 'OPPONENT_FORFEIT':
+        return youWon
+          ? { text: '🏆 You won — your opponent forfeited.', tone: 'text-accent-2' }
+          : { text: 'You forfeited — better luck next duel.', tone: 'text-accent' }
+      case 'OPPONENT_NO_SHOW':
+        return youWon
+          ? { text: '🏆 Walkover — your opponent never showed.', tone: 'text-accent-2' }
+          : { text: `${opponentName} won by walkover.`, tone: 'text-accent' }
+      case 'NO_SHOW_VOID':
+        return { text: '⏱ Match voided — nobody showed up.', tone: 'text-gold' }
+      case 'TIMEOUT':
+        return { text: '⏱ Match expired — time ran out, no winner.', tone: 'text-gold' }
+      default:
+        if (winnerUserId == null) return { text: '⏱ Match over — no winner.', tone: 'text-gold' }
+        return youWon
+          ? { text: '🏆 You won the duel!', tone: 'text-accent-2' }
+          : { text: `${nameFor(winnerUserId)} won the duel.`, tone: 'text-accent' }
+    }
+  }
 
   async function handleForfeit() {
     setForfeiting(true)
@@ -304,14 +335,8 @@ export function DuelPage() {
       {matchOver && (
         <Card className="border-accent">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="font-display text-[22px] font-bold">
-              {winnerUserId == null ? (
-                <span className="text-gold">⏱ Match expired — the hour ran out, no winner.</span>
-              ) : winnerUserId === user?.id ? (
-                <span className="text-accent-2">🏆 You won the duel!</span>
-              ) : (
-                <span className="text-accent">{nameFor(winnerUserId)} won the duel.</span>
-              )}
+            <p className={`font-display text-[22px] font-bold ${matchOverMessage().tone}`}>
+              {matchOverMessage().text}
             </p>
             <Button variant="secondary" onClick={() => navigate('/')}>
               Back to lobby

@@ -18,6 +18,14 @@ export type MatchmakingStatus = 'WAITING' | 'MATCHED'
 
 export type MatchEventType = 'MATCH_READY' | 'SUBMISSION_JUDGED' | 'MATCH_OVER'
 
+/** Why a match ended (carried on MATCH_OVER). winnerUserId is null for NO_SHOW_VOID / TIMEOUT. */
+export type MatchEndReason =
+  | 'SOLVED'
+  | 'OPPONENT_FORFEIT'
+  | 'OPPONENT_NO_SHOW'
+  | 'NO_SHOW_VOID'
+  | 'TIMEOUT'
+
 /** GET /me/profile — the user's stored profile row (avatar defaults to the Google picture). */
 export interface UserProfile {
   id: number
@@ -129,7 +137,8 @@ export interface MatchEventData {
   verdict?: Verdict
   passedTests?: number
   totalTests?: number
-  winnerUserId?: number
+  winnerUserId?: number | null
+  endReason?: MatchEndReason
 }
 
 /** Backend error envelope (com.coduel.common.data.ErrorData). */

@@ -2,12 +2,15 @@ import { Link } from 'react-router-dom'
 import { Card } from '../components/ui/Card'
 import { Reveal } from '../components/ui/Reveal'
 import { Loader } from '../components/ui/Loader'
+import { StatusPill } from '../components/ui/StatusPill'
 import { problemApi } from '../lib/api'
 import { useAsync } from '../hooks/useAsync'
 
 export function Practice() {
   const { data, loading, error } = useAsync(() => problemApi.getPage(0, 50), [])
   const problems = data?.content ?? []
+  // Status rides along on each problem (GET /problem), so it reveals together with the list.
+  const ready = !loading
 
   return (
     <>
@@ -19,7 +22,7 @@ export function Practice() {
           Problem set
         </h1>
         <p className="mt-4 text-ink-soft">
-          {loading
+          {!ready
             ? 'Loading…'
             : `${problems.length} problem${problems.length === 1 ? '' : 's'} `}
         </p>
@@ -31,37 +34,43 @@ export function Practice() {
         </Card>
       )}
 
-      {!error && loading && problems.length === 0 && (
+      {!error && !ready && (
         <Card className="grid place-items-center py-16">
           <Loader label="Loading problems" />
         </Card>
       )}
 
-      {!error && !loading && problems.length === 0 && (
+      {!error && ready && problems.length === 0 && (
         <Card>
           <p className="text-ink-soft">No problems yet — seed some on the backend.</p>
         </Card>
       )}
 
-      {!error && problems.length > 0 && (
+      {!error && ready && problems.length > 0 && (
         <Reveal>
-        <Card className="!p-0">
-          {problems.map((p, i) => (
-            <Link
-              key={p.slug}
-              to={`/practice/${p.slug}`}
-              className={`flex items-center gap-4 px-[22px] py-5 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.03] ${
-                i > 0 ? 'border-t border-line' : ''
-              }`}
-            >
-              <span className="font-mono text-sm text-ink-soft">
-                {String(i + 1).padStart(2, '0')}
-              </span>
-              <span className="text-[17px] font-semibold">{p.title}</span>
-              <span className="ml-auto font-mono text-xs text-ink-soft">solve →</span>
-            </Link>
-          ))}
-        </Card>
+          <Card className="!p-0">
+            {problems.map((p, i) => {
+              const status = p.status
+              return (
+                <Link
+                  key={p.slug}
+                  to={`/practice/${p.slug}`}
+                  className={`flex items-center gap-4 px-[22px] py-5 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.03] ${
+                    i > 0 ? 'border-t border-line' : ''
+                  }`}
+                >
+                  <span className="font-mono text-sm text-ink-soft">
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <span className="text-[17px] font-semibold">{p.title}</span>
+                  <span className="ml-auto flex items-center gap-3">
+                    {status && <StatusPill verdict={status} />}
+                    <span className="font-mono text-xs text-ink-soft">solve →</span>
+                  </span>
+                </Link>
+              )
+            })}
+          </Card>
         </Reveal>
       )}
     </>

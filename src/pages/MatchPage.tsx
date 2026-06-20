@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Collapsible } from '../components/ui/Collapsible'
 import { Card } from '../components/ui/Card'
@@ -6,18 +6,23 @@ import { SectionLabel } from '../components/ui/SectionLabel'
 import { Avatar } from '../components/ui/Avatar'
 import { Button } from '../components/ui/Button'
 import { CodeEditor } from '../components/editor/CodeEditor'
+import { ConfettiCannon } from '../components/ui/ConfettiCannon'
 import { Loader } from '../components/ui/Loader'
 import { matchApi, problemApi, submissionApi } from '../lib/api'
 import { useAsync } from '../hooks/useAsync'
 import { useMatchSocket } from '../hooks/useMatchSocket'
 import { useAuth } from '../hooks/useAuth'
 import { VERDICT_LABEL, verdictTone } from '../lib/verdict'
+import { FILE_EXT } from '../lib/languages'
 import type { Language, MatchEndReason, MatchEventData, Verdict } from '../types'
 
 const fmt = (s: number) =>
   `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+// How long the finish screen lingers before auto-returning (home for duels, lobby for rooms).
+// Stays under the 30s lobby-presence grace so a returning room player is never kicked en route.
+const MATCH_RETURN_MS = 15_000
 
 interface Progress {
   passed: number | null
@@ -31,7 +36,7 @@ interface FeedEntry {
   tone: string
 }
 
-export function DuelPage() {
+export function MatchPage() {
   const { matchId } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -42,6 +47,9 @@ export function DuelPage() {
     return { match, problem }
   }, [matchId])
 
+  // This same arena serves matchmaking duels and private-room games; roomId distinguishes them.
+  const isRoom = data?.match.roomId != null
+
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState<Language>('PYTHON')
   const [submitMsg, setSubmitMsg] = useState<string | null>(null)
@@ -49,6 +57,7 @@ export function DuelPage() {
 
   // live match state
   const [progress, setProgress] = useState<Record<number, Progress>>({})
+  const [forfeited, setForfeited] = useState<Set<number>>(new Set())
   const [feed, setFeed] = useState<FeedEntry[]>([])
   const [winnerUserId, setWinnerUserId] = useState<number | null>(null)
   const [endReason, setEndReason] = useState<MatchEndReason | null>(null)
@@ -58,16 +67,19 @@ export function DuelPage() {
   const [countdown, setCountdown] = useState<number | null>(null)
   const [confirmForfeit, setConfirmForfeit] = useState(false)
   const [forfeiting, setForfeiting] = useState(false)
+  // I forfeited but stay to spectate — editor disabled, can watch and leave when I want.
+  const [iForfeited, setIForfeited] = useState(false)
 
-  // Pre-match: once both players are present (MATCH_READY), play a short VS countdown, then start.
+  // Pre-match countdown: duels start it once both players are present (MATCH_READY); room games
+  // start it as soon as the match loads (everyone already readied up in the lobby). Then a 3-2-1.
   useEffect(() => {
-    if (!ready || started || ended) return
+    if ((!ready && !isRoom) || started || ended) return
     setCountdown(3)
     const id = window.setInterval(() => {
       setCountdown((c) => (c === null ? null : c <= 1 ? 0 : c - 1))
     }, 1000)
     return () => clearInterval(id)
-  }, [ready, started, ended])
+  }, [ready, isRoom, started, ended])
 
   useEffect(() => {
     if (countdown === 0) setStarted(true)
@@ -98,18 +110,22 @@ export function DuelPage() {
   useEffect(() => {
     if (!data?.match) return
     setWinnerUserId(data.match.winnerUserId)
+    // Seed forfeited players from the server so a refresh still shows who's dropped out.
+    setForfeited(new Set(data.match.participants.filter((p) => p.forfeit).map((p) => p.userId)))
+    // If I'm already forfeited (refresh / direct URL), drop into spectate mode.
+    if (data.match.participants.find((p) => p.userId === user?.id)?.forfeit) setIForfeited(true)
     const over = data.match.state !== 'ACTIVE'
     setEnded(over)
     // Reload of a match whose pre-match intro already played this session → skip straight to the
     // editor (a reconnect re-fires MATCH_READY, which would otherwise replay the countdown).
-    if (!over && matchId && sessionStorage.getItem(`coduel-duel-intro-${matchId}`)) {
+    if (!over && matchId && sessionStorage.getItem(`coduel-match-intro-${matchId}`)) {
       setStarted(true)
     }
   }, [data, matchId])
 
   // Once the match has started, remember it so a reload doesn't replay the intro.
   useEffect(() => {
-    if (started && matchId) sessionStorage.setItem(`coduel-duel-intro-${matchId}`, '1')
+    if (started && matchId) sessionStorage.setItem(`coduel-match-intro-${matchId}`, '1')
   }, [started, matchId])
 
   const participants = data?.match.participants ?? []
@@ -118,6 +134,82 @@ export function DuelPage() {
   const opponentName = opponent?.displayName ?? 'your opponent'
   const nameFor = (id: number) =>
     participants.find((p) => p.userId === id)?.displayName ?? 'player'
+
+  // "Back to lobby" returns room games to their room; matchmaking duels go home.
+  const backToLobby = () =>
+    navigate(data?.match.roomId != null ? `/room/${data.match.roomId}` : '/', { replace: true })
+
+  const youWon = ended && winnerUserId != null && winnerUserId === user?.id
+
+  const solvedLines = [
+          'You cracked it first. Clean win.',
+          'First correct submission. Nobody came close.',
+          'Sharp solve — they were still thinking.',
+          'You saw the answer. They were still reading.',
+          'Decisive. No second place today.',
+          'One and done. That\'s how you do it.',
+          'You got there. That\'s all that matters.',
+          'Outthought and outpaced. Textbook.',
+          'They had the same problem. You had the better mind.',
+          'Fast and correct. The only combo that counts.',
+          'While they debugged, you submitted.',
+          'First to finish. Last to doubt yourself.',
+          'Clean solution. Cleaner execution.',
+          'You didn\'t just solve it — you solved it first.',
+          'The problem picked the wrong opponent.',
+          'No hints. No luck. Just you.',
+          'Flawless run. All tests green.',
+          'They blinked. You shipped.',
+          'Logic locked in. Problem locked out.',
+          'You made it look easy.',
+          'Efficiency: peak. Result: gold.',
+          'That\'s what preparation looks like.',
+          'Read it, solved it, submitted. Done.',
+          'They\'re still typing. You\'re already here.',
+          'No hesitation. No mercy.',
+          'First blood. Match sealed.',
+          'You saw the pattern before the problem finished loading.',
+          'Dominant. No other word for it.',
+          'One correct submission is all it takes. You knew that.',
+          'They had time. You had answers.',
+          'Problem met its match — and lost.',
+          'Your code ran. Theirs didn\'t matter.',
+          'Zero edge cases missed. Zero competition.',
+          'All tests passed. All rivals passed over.',
+          'You solved it like you\'d seen it before.',
+          'The scoreboard never had a chance to get close.',
+          'Faster to the finish line than anyone expected.',
+          'Some people find the trick. You were the trick.',
+          'Methodical. Precise. First.',
+          'The gap between you and second? Decisive.',
+          'Every second counted. You used them better.',
+          'You kept your cool and they kept their wrong answer.',
+          'Built different. Proved today.',
+          'No noise. No panic. Just a correct solution.',
+          'They had the same shot. You took yours.',
+          'Pressure sharpens some people. You\'re one of them.',
+          'Turned a hard problem into a closed match.',
+          'That solve had your name on it from the start.',
+          'W. No further comments.',
+  ]
+
+  // Pick once when the match ends — useMemo with [ended] so it never re-rolls on re-renders
+  // (returnIn ticks every second, which would otherwise cycle through the list).
+  const solvedSubtitle = useMemo(
+    () => solvedLines[Math.floor(Math.random() * solvedLines.length)],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ended],
+  )
+
+  const winReasonSubtitle = () => {
+    switch (endReason) {
+      case 'SOLVED':           return solvedSubtitle
+      case 'OPPONENT_FORFEIT': return 'Your opponent tapped out. Still your win.'
+      case 'OPPONENT_NO_SHOW': return 'They never showed. Walkover, but a win is a win.'
+      default:                 return 'Well played.'
+    }
+  }
+
 
   function handleEvent(e: MatchEventData) {
     if (e.type === 'MATCH_READY') {
@@ -146,6 +238,12 @@ export function DuelPage() {
         ].slice(0, 40),
       )
       if (userId === user?.id) setSubmitMsg(null)
+    } else if (e.type === 'PLAYER_FORFEIT' && e.userId != null) {
+      const userId = e.userId
+      setForfeited((prev) => new Set(prev).add(userId))
+      setFeed((f) =>
+        [{ t: fmt(elapsedAt()), who: nameFor(userId), text: '▸ forfeited', tone: 'text-accent' }, ...f],
+      )
     } else if (e.type === 'MATCH_OVER') {
       setWinnerUserId(e.winnerUserId ?? null)
       setEndReason(e.endReason ?? null)
@@ -160,19 +258,35 @@ export function DuelPage() {
 
   const matchOver = ended
 
+  // When the match ends, let the result sit (enough to savour a win), then return everyone to where
+  // they belong — home for duels, the room lobby for room games. A visible countdown ticks it down;
+  // the manual button is there for anyone who wants to leave sooner.
+  const [returnIn, setReturnIn] = useState(0)
+  useEffect(() => {
+    if (!matchOver) return
+    setReturnIn(Math.round(MATCH_RETURN_MS / 1000))
+    const tick = setInterval(() => setReturnIn((s) => (s <= 1 ? 0 : s - 1)), 1000)
+    const t = setTimeout(backToLobby, MATCH_RETURN_MS)
+    return () => {
+      clearInterval(tick)
+      clearTimeout(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchOver])
+
   // Match-finish banner copy, chosen from the end reason + whether you're the winner / loser /
-  // neither. Falls back to a generic line on reload (GET /matches carries no end reason).
+  // neither. Falls back to a generic line on reload (GET /match carries no end reason).
   const matchOverMessage = (): { text: string; tone: string } => {
     const youWon = winnerUserId != null && winnerUserId === user?.id
     switch (endReason) {
       case 'SOLVED':
         return youWon
           ? { text: '🏆 You won — first to solve it!', tone: 'text-accent-2' }
-          : { text: `${opponentName} solved it first.`, tone: 'text-accent' }
+          : { text: `${winnerUserId != null ? nameFor(winnerUserId) : 'Someone'} solved it first.`, tone: 'text-accent' }
       case 'OPPONENT_FORFEIT':
         return youWon
-          ? { text: '🏆 You won — your opponent forfeited.', tone: 'text-accent-2' }
-          : { text: 'You forfeited — better luck next duel.', tone: 'text-accent' }
+          ? { text: '🏆 You won — everyone else dropped out.', tone: 'text-accent-2' }
+          : { text: 'You left the match — better luck next time.', tone: 'text-accent' }
       case 'OPPONENT_NO_SHOW':
         return youWon
           ? { text: '🏆 Walkover — your opponent never showed.', tone: 'text-accent-2' }
@@ -184,8 +298,8 @@ export function DuelPage() {
       default:
         if (winnerUserId == null) return { text: '⏱ Match over — no winner.', tone: 'text-gold' }
         return youWon
-          ? { text: '🏆 You won the duel!', tone: 'text-accent-2' }
-          : { text: `${nameFor(winnerUserId)} won the duel.`, tone: 'text-accent' }
+          ? { text: '🏆 You won the match!', tone: 'text-accent-2' }
+          : { text: `${nameFor(winnerUserId)} won the match.`, tone: 'text-accent' }
     }
   }
 
@@ -193,10 +307,14 @@ export function DuelPage() {
     setForfeiting(true)
     try {
       await matchApi.forfeit(matchId!)
-      // success: the MATCH_OVER event ends the match; leave the button disabled until it lands
-    } catch {
-      setForfeiting(false)
+      // Stay and spectate — the editor disables, but you can watch the rest and see who wins, then
+      // leave (or the match-over flow returns everyone) on your terms.
+      setIForfeited(true)
       setConfirmForfeit(false)
+    } catch {
+      // ignore — surfaced by the disabled state / next event
+    } finally {
+      setForfeiting(false)
     }
   }
 
@@ -254,18 +372,28 @@ export function DuelPage() {
         <div>
           <div className="font-mono text-[12px] text-ink-soft">
             <span className="text-accent-2">coduel</span>:
-            <span className="text-accent">~/duel/{data?.match.slug ?? matchId}</span> $
+            <span className="text-accent">~/{isRoom ? 'room' : 'duel'}/{data?.match.slug ?? matchId}</span> $
           </div>
           <h1 className="mt-1.5 font-display text-[22px] font-extrabold leading-tight tracking-[-0.025em] sm:text-[26px] lg:text-[30px] lg:leading-none">
             {loading ? 'Loading…' : (data?.match.problemTitle ?? 'Duel')}
           </h1>
         </div>
         <div className="flex items-center gap-4">
-          {started && !matchOver && (
+          {iForfeited && !matchOver && (
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft">
+                ⚑ Forfeited · spectating
+              </span>
+              <Button variant="secondary" size="sm" onClick={backToLobby}>
+                Back to lobby
+              </Button>
+            </div>
+          )}
+          {started && !matchOver && !iForfeited && (
             <div className="relative">
               <button
                 onClick={() => setConfirmForfeit((o) => !o)}
-                title="Leave the duel — your opponent wins"
+                title="Leave the match — you forfeit"
                 className="inline-flex items-center gap-1.5 rounded-xl border border-accent/40 px-3.5 py-2 font-mono text-[12px] uppercase tracking-[0.12em] text-accent transition hover:bg-accent/10"
               >
                 ⚑ Forfeit
@@ -280,11 +408,9 @@ export function DuelPage() {
                     className="fixed inset-0 z-40 cursor-default"
                   />
                   <div className="reflective animate-reveal absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-accent/30 bg-paper-2 p-4 text-left shadow-[0_18px_44px_-18px_rgba(158,59,42,0.5)]">
-                    <p className="font-display text-[16px] font-bold">Forfeit the duel?</p>
+                    <p className="font-display text-[16px] font-bold">Forfeit the match?</p>
                     <p className="mt-1.5 text-[13px] leading-relaxed text-ink-soft">
-                      You'll leave the match and{' '}
-                      <span className="font-semibold text-accent">{opponentName} wins</span>. This
-                      can't be undone.
+                      You'll drop out of this match — this can't be undone.
                     </p>
                     <div className="mt-4 flex justify-end gap-2">
                       <Button variant="ghost" size="sm" onClick={() => setConfirmForfeit(false)}>
@@ -333,19 +459,58 @@ export function DuelPage() {
       )}
 
       {matchOver && (
-        <Card className="border-accent">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className={`font-display text-[22px] font-bold ${matchOverMessage().tone}`}>
-              {matchOverMessage().text}
-            </p>
-            <Button variant="secondary" onClick={() => navigate('/')}>
-              Back to lobby
-            </Button>
-          </div>
-        </Card>
+        <>
+          {youWon && <ConfettiCannon />}
+          {youWon ? (
+            // Win — gold border glow + clean entrance; the confetti does the heavy lifting above.
+            <div
+              className="animate-win-card reflective rounded-[14px] border border-gold/50 bg-paper-2 p-[22px]"
+              style={{
+                boxShadow:
+                  '0 0 0 1px color-mix(in srgb,var(--color-gold) 10%,transparent),' +
+                  '0 4px 24px -8px color-mix(in srgb,var(--color-gold) 18%,transparent)',
+              }}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-gold">
+                    ● Match over
+                  </div>
+                  <p className="font-display text-[22px] font-bold text-gold">You won.</p>
+                  <p className="mt-1 text-[13px] text-ink-soft">{winReasonSubtitle()}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-[11px] text-ink-soft">
+                    returning {isRoom ? 'to the lobby' : 'home'} in {returnIn}s
+                  </span>
+                  <Button variant="secondary" onClick={backToLobby}>
+                    {isRoom ? 'Back to lobby' : 'Back home'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            // Lose — flat card, no fanfare. The asymmetry is the effect.
+            <Card className="border-line">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className={`font-display text-[22px] font-bold ${matchOverMessage().tone}`}>
+                  {matchOverMessage().text}
+                </p>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-[11px] text-ink-soft">
+                    returning {isRoom ? 'to the lobby' : 'home'} in {returnIn}s
+                  </span>
+                  <Button variant="secondary" onClick={backToLobby}>
+                    {isRoom ? 'Back to lobby' : 'Back home'}
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+        </>
       )}
 
-      {data && !started && !matchOver && (
+      {data && !started && !matchOver && !isRoom && (
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <Card className="animate-reveal w-full max-w-md text-center">
             <div className="font-mono text-xs uppercase tracking-[0.18em] text-accent">
@@ -394,6 +559,22 @@ export function DuelPage() {
         </div>
       )}
 
+      {/* room pre-match: everyone readied in the lobby, so a clean N-player 3-2-1 (no VS framing) */}
+      {data && isRoom && !started && !matchOver && (
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <Card className="animate-reveal w-full max-w-md text-center">
+            <div className="font-mono text-xs uppercase tracking-[0.18em] text-accent">● Get ready</div>
+            <h2 className="mt-3 font-display text-[28px] font-extrabold leading-tight">Match starting</h2>
+            <p className="mt-2 text-ink-soft">
+              {participants.length} players · first to solve it wins.
+            </p>
+            <div className="mt-7 font-display text-[56px] font-extrabold leading-none tabular-nums text-accent">
+              {countdown && countdown > 0 ? countdown : 'Go'}
+            </div>
+          </Card>
+        </div>
+      )}
+
       {data && (started || matchOver) && (
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-[22px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] lg:grid-rows-none">
           {/* left — scoreboard + problem + feed (the live layer, page-owned) */}
@@ -403,13 +584,14 @@ export function DuelPage() {
               {participants.map((p, i) => {
                 const you = p.userId === user?.id
                 const pr = progress[p.userId]
+                const isOut = forfeited.has(p.userId)
                 const pct = pr?.total ? Math.round(((pr.passed ?? 0) / pr.total) * 100) : 0
                 return (
                   <div
                     key={p.userId}
                     className={`flex items-center gap-3 py-3 ${
                       i > 0 ? 'border-t border-dashed border-line' : ''
-                    }`}
+                    } ${isOut ? 'opacity-45' : ''}`}
                   >
                     <Avatar
                       initial={(p.displayName ?? '?').charAt(0).toUpperCase()}
@@ -417,32 +599,47 @@ export function DuelPage() {
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-[15px] font-semibold">
-                        <span className="truncate">{p.displayName ?? 'player'}</span>
+                        <span className={`truncate ${isOut ? 'line-through' : ''}`}>
+                          {p.displayName ?? 'player'}
+                        </span>
                         {you && (
                           <span className="rounded-[5px] bg-accent px-[7px] py-[2px] font-mono text-[10px] tracking-[0.15em] text-white">
                             YOU
                           </span>
                         )}
-                        {winnerUserId === p.userId && <span>🏆</span>}
+                        {isOut && (
+                          <span className="rounded-[5px] bg-accent/10 px-[7px] py-[2px] font-mono text-[10px] tracking-[0.15em] text-accent">
+                            FORFEITED
+                          </span>
+                        )}
+                        {winnerUserId === p.userId && (
+                          <span className="text-gold" aria-label="winner">✦</span>
+                        )}
                       </div>
-                      <div className={`font-mono text-xs ${verdictTone(pr?.verdict ?? null)}`}>
-                        {pr
-                          ? pr.total != null
-                            ? `${pr.passed}/${pr.total} tests · ${pr.verdict ? VERDICT_LABEL[pr.verdict] : ''}`
-                            : (pr.verdict && VERDICT_LABEL[pr.verdict]) || 'submitted'
-                          : 'no submission yet'}
-                      </div>
-                      <div className="mt-[7px] h-[7px] overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/10">
-                        <i
-                          className="block h-full rounded-full transition-[width] duration-500"
-                          style={{
-                            width: `${pct}%`,
-                            background: you
-                              ? 'linear-gradient(90deg, var(--color-accent), #c4573f)'
-                              : 'linear-gradient(90deg, var(--color-gold), #caa05a)',
-                          }}
-                        />
-                      </div>
+                      {isOut ? (
+                        <div className="font-mono text-xs text-accent">⚑ left the match</div>
+                      ) : (
+                        <>
+                          <div className={`font-mono text-xs ${verdictTone(pr?.verdict ?? null)}`}>
+                            {pr
+                              ? pr.total != null
+                                ? `${pr.passed}/${pr.total} tests · ${pr.verdict ? VERDICT_LABEL[pr.verdict] : ''}`
+                                : (pr.verdict && VERDICT_LABEL[pr.verdict]) || 'submitted'
+                              : 'no submission yet'}
+                          </div>
+                          <div className="mt-[7px] h-[7px] overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/10">
+                            <i
+                              className="block h-full rounded-full transition-[width] duration-500"
+                              style={{
+                                width: `${pct}%`,
+                                background: you
+                                  ? 'linear-gradient(90deg, var(--color-accent), #c4573f)'
+                                  : 'linear-gradient(90deg, var(--color-gold), #caa05a)',
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )
@@ -480,11 +677,15 @@ export function DuelPage() {
             code={code}
             onCodeChange={setCode}
             samples={data.problem.testCases}
-            filename={`${data.match.slug ?? 'duel'}.${language === 'PYTHON' ? 'py' : 'txt'}`}
+            filename={`${data.match.slug ?? 'duel'}.${FILE_EXT[language]}`}
             onSubmit={handleSubmit}
             submitView={submitView}
-            disabled={matchOver}
-            disabledHint="Match over — start a new duel from the lobby."
+            disabled={matchOver || iForfeited}
+            disabledHint={
+              iForfeited
+                ? "You forfeited — you're spectating. You can't submit."
+                : 'Match over — start a new match from the lobby.'
+            }
             className="min-h-[480px] lg:min-h-0"
           />
         </div>

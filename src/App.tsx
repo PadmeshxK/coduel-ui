@@ -3,9 +3,11 @@ import { Lobby } from './pages/Lobby'
 import { Practice } from './pages/Practice'
 import { Leaderboard } from './pages/Leaderboard'
 import { Solve } from './pages/Solve'
-import { DuelPage } from './pages/DuelPage'
+import { MatchPage } from './pages/MatchPage'
+import { RoomPage } from './pages/RoomPage'
 import { Login } from './pages/Login'
 import { Profile } from './pages/Profile'
+import { Friends } from './pages/Friends'
 import { Styleguide } from './pages/Styleguide'
 import { ErrorPage } from './pages/ErrorPage'
 import { RequireAuth } from './components/RequireAuth'
@@ -22,47 +24,78 @@ function App() {
     <>
       <ScrollToTop />
       <Routes>
-      {/* standard layout — navbar rendered once, pages render into the Outlet */}
-      <Route element={<DefaultLayout />}>
-        <Route
-          path="/"
-          element={
-            <RequireAuth>
-              <Lobby />
-            </RequireAuth>
-          }
-        />
-        <Route path="/practice" element={<Practice />} />
-        <Route path="/leaderboard" element={<Leaderboard />} />
-        <Route
-          path="/profile"
-          element={
-            <RequireAuth>
-              <Profile />
-            </RequireAuth>
-          }
-        />
-        <Route path="/styleguide" element={<Styleguide />} />
-      </Route>
+        {/* standard layout — navbar rendered once, pages render into the Outlet */}
+        <Route element={<DefaultLayout />}>
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <Lobby />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/practice"
+            element={
+              <RequireAuth>
+                <Practice />
+              </RequireAuth>
+            }
+          />
+          <Route path="/leaderboard" element={<Leaderboard />} />
+          <Route
+            path="/profile"
+            element={
+              <RequireAuth>
+                <Profile />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/friend"
+            element={
+              <RequireAuth>
+                <Friends />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/room/:roomId"
+            element={
+              <RequireAuth>
+                <RoomPage />
+              </RequireAuth>
+            }
+          />
+          <Route path="/styleguide" element={<Styleguide />} />
+        </Route>
 
-      {/* full-height layout for the code editor + duel */}
-      <Route element={<FillLayout />}>
-        <Route path="/practice/:slug" element={<Solve />} />
-        <Route
-          path="/duel/:matchId"
-          element={
-            <RequireAuth>
-              <DuelPage />
-            </RequireAuth>
-          }
-        />
-      </Route>
+        {/* full-height layout for the code editor + 1v1 duel */}
+        <Route element={<FillLayout />}>
+          <Route
+            path="/practice/:slug"
+            element={
+              <RequireAuth>
+                <Solve />
+              </RequireAuth>
+            }
+          />
+          {/* Shared match arena — matchmaking duels and private-room games both land here. */}
+          <Route
+            path="/match/:matchId"
+            element={
+              <RequireAuth>
+                <MatchPage />
+              </RequireAuth>
+            }
+          />
+        </Route>
 
-      {/* standalone — its own minimal header */}
-      <Route path="/login" element={<Login />} />
+        {/* standalone — its own minimal header */}
+        <Route path="/login" element={<Login />} />
 
-      {/* common error page — catch-all 404 */}
-      <Route path="*" element={<ErrorPage />} />
+        {/* catch-all 404 */}
+        <Route path="*" element={<ErrorPage />} />
       </Routes>
     </>
   )

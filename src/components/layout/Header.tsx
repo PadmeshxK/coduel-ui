@@ -2,13 +2,15 @@ import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { Logo } from '../ui/Logo'
 import { Avatar } from '../ui/Avatar'
 import { ThemeToggle } from '../ui/ThemeToggle'
+import { NotificationBell } from '../ui/NotificationBell'
 import { useAuth } from '../../hooks/useAuth'
 import { authApi } from '../../lib/api'
 
 const NAV = [
-  { label: 'Duel', to: '/' },
+  { label: 'Home', to: '/' },
   { label: 'Practice', to: '/practice' },
   { label: 'Leaderboard', to: '/leaderboard' },
+  { label: 'Friends', to: '/friend' },
 ]
 
 export function Header() {
@@ -59,6 +61,7 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-2 justify-self-end sm:gap-3">
+          {displayName && <NotificationBell />}
           <ThemeToggle />
           {displayName ? (
             <div className="group relative">

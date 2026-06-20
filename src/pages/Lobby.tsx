@@ -4,7 +4,7 @@ import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { SectionLabel } from '../components/ui/SectionLabel'
 import { Loader } from '../components/ui/Loader'
-import { matchmakingApi } from '../lib/api'
+import { matchmakingApi, roomApi } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -45,7 +45,7 @@ export function Lobby() {
         // a brief "opponent found" beat so the handoff feels deliberate, not an instant jump
         setFound(true)
         await sleep(900)
-        if (active.current) navigate(`/duel/${res.matchId}`)
+        if (active.current) navigate(`/match/${res.matchId}`)
       }
     } catch (e) {
       if (searchingRef.current) setError(e instanceof Error ? e.message : 'Matchmaking failed')
@@ -67,6 +67,18 @@ export function Lobby() {
     }
   }
 
+  const [creatingRoom, setCreatingRoom] = useState(false)
+
+  async function createRoom() {
+    setCreatingRoom(true)
+    try {
+      const room = await roomApi.create()
+      navigate(`/room/${room.roomId}`)
+    } catch {
+      setCreatingRoom(false)
+    }
+  }
+
   const firstName = (user?.displayName ?? user?.email ?? 'there').split(' ')[0]
 
   return (
@@ -76,14 +88,14 @@ export function Lobby() {
           ● Welcome back, {firstName}
         </div>
         <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[56px] lg:leading-none">
-          Ready to duel?
+          Ready to play?
         </h1>
         <p className="mt-4 max-w-xl text-base text-ink-soft sm:text-lg">
-          Two coders, one problem, a live race — the first correct submission wins.
+          Pick a mode below and start coding.
         </p>
       </div>
 
-      <div className="mt-10 grid grid-cols-1 gap-[22px] md:grid-cols-[1.2fr_1fr]">
+      <div className="mt-10 grid grid-cols-1 gap-[22px] md:grid-cols-3">
         <Card className="flex flex-col justify-between">
           <div>
             <SectionLabel>Ranked Duel</SectionLabel>
@@ -129,6 +141,21 @@ export function Lobby() {
           <div className="mt-6">
             <Button variant="secondary" onClick={() => navigate('/practice')}>
               Browse problems
+            </Button>
+          </div>
+        </Card>
+
+        <Card className="flex flex-col justify-between">
+          <div>
+            <SectionLabel>Private Room</SectionLabel>
+            <p className="mt-3.5 font-display text-[24px] font-bold">Play with friends</p>
+            <p className="mt-2 text-ink-soft">
+              Create a room, invite up to 9 friends, and race together on the same problem.
+            </p>
+          </div>
+          <div className="mt-6">
+            <Button variant="secondary" disabled={creatingRoom} onClick={createRoom}>
+              {creatingRoom ? 'Creating…' : 'Create a room'}
             </Button>
           </div>
         </Card>

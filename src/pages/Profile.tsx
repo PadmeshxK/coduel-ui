@@ -91,7 +91,12 @@ export function Profile() {
       <Card className="max-w-2xl">
         {/* live preview header */}
         <div className="flex items-center gap-5 border-b border-dashed border-line pb-6">
-          <Avatar initial={initial} src={previewSrc} size={76} />
+          <div className="flex flex-col items-center gap-2">
+            <Avatar initial={initial} src={previewSrc} size={76} />
+            <span className="whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.14em] text-ink-soft">
+              paste image URL ↓
+            </span>
+          </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="font-display text-[24px] font-bold leading-tight">

@@ -83,6 +83,30 @@ html.lenis body {
   }
 }
 
+/* Win-card entrance: same feel as reveal but with a gentle scale so the card "settles in". */
+@keyframes win-card-reveal {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);    }
+}
+.animate-win-card {
+  animation: win-card-reveal 0.5s var(--ease-fluid) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-win-card { animation: none; }
+}
+
+/* Invite auto-dismiss countdown: a thin accent→gold "fuse" pinned to the notification's bottom
+   edge that depletes left→right over its lifetime (see InvitePopup.tsx). It's a functional time-
+   remaining indicator, so it runs even under reduced-motion; hovering pauses it via play-state. */
+@keyframes invite-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
 /* Wordmark logo caret — a blinking terminal cursor after "coduel". Scales with font-size (em). */
 @keyframes caret-blink {
   0%,

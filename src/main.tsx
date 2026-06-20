@@ -4,12 +4,18 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
 import { AuthProvider } from './hooks/useAuth'
+import { NotificationsProvider } from './hooks/useNotifications'
+import { InvitePopupLayer } from './components/ui/InvitePopup'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <App />
+        <NotificationsProvider>
+          <App />
+          {/* Rendered outside the router Outlet so it's always visible regardless of the current page. */}
+          <InvitePopupLayer />
+        </NotificationsProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,

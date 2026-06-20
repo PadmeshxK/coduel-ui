@@ -5,9 +5,10 @@ import type { Language } from '../../types'
 interface LanguageSelectProps {
   value: Language
   onChange: (lang: Language) => void
+  disabled?: boolean
 }
 
-export function LanguageSelect({ value, onChange }: LanguageSelectProps) {
+export function LanguageSelect({ value, onChange, disabled = false }: LanguageSelectProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const current = LANGUAGES.find((l) => l.value === value) ?? LANGUAGES[0]
@@ -30,9 +31,10 @@ export function LanguageSelect({ value, onChange }: LanguageSelectProps) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-md border border-white/15 bg-white/[0.05] px-3 py-1.5 font-mono text-xs text-[#e7d9bd] transition hover:border-white/35 hover:bg-white/[0.1]"
+        disabled={disabled}
+        className="flex items-center gap-2 rounded-md border border-line bg-black/[0.04] px-3 py-1.5 font-mono text-xs text-ink transition hover:border-ink-soft/50 hover:bg-black/[0.08] disabled:pointer-events-none disabled:opacity-40 dark:bg-white/[0.05] dark:hover:bg-white/[0.1]"
       >
-        <span className="h-2 w-2 rounded-full bg-[#E5944A]" />
+        <span className="h-2 w-2 rounded-full bg-gold" />
         {current.label}
         <svg
           width="10"
@@ -52,7 +54,7 @@ export function LanguageSelect({ value, onChange }: LanguageSelectProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-20 mt-2 min-w-[170px] overflow-hidden rounded-lg border border-white/15 bg-[#241b13] p-1 shadow-[0_20px_44px_-14px_rgba(0,0,0,0.7)]">
+        <div className="absolute right-0 z-20 mt-2 min-w-[170px] overflow-hidden rounded-lg border border-line bg-paper-2 p-1 shadow-[0_20px_44px_-14px_rgba(0,0,0,0.4)]">
           {LANGUAGES.map((l) => {
             const active = l.value === value
             return (
@@ -62,17 +64,15 @@ export function LanguageSelect({ value, onChange }: LanguageSelectProps) {
                   onChange(l.value)
                   setOpen(false)
                 }}
-                className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left font-mono text-xs transition hover:bg-white/[0.07] ${
-                  active ? 'text-[#e7d9bd]' : 'text-[#a2937c]'
+                className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left font-mono text-xs transition hover:bg-black/[0.05] dark:hover:bg-white/[0.07] ${
+                  active ? 'text-ink' : 'text-ink-soft'
                 }`}
               >
                 <span
-                  className={`h-2 w-2 rounded-full ${
-                    active ? 'bg-[#E5944A]' : 'border border-white/25'
-                  }`}
+                  className={`h-2 w-2 rounded-full ${active ? 'bg-gold' : 'border border-ink-soft/40'}`}
                 />
                 {l.label}
-                {active && <span className="ml-auto text-[#74B394]">✓</span>}
+                {active && <span className="ml-auto text-accent-2">✓</span>}
               </button>
             )
           })}

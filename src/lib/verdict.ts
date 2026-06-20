@@ -17,3 +17,19 @@ export const verdictTone = (v: Verdict | null) =>
     : v === 'PENDING' || v == null
       ? 'text-ink-soft'
       : 'text-accent'
+
+export type ProblemStatus = 'solved' | 'attempted' | 'failed'
+
+/** Reduce a verdict to a problem's status. PENDING = still judging → counts as attempted. */
+export function problemStatus(v: Verdict): ProblemStatus {
+  if (v === 'ACCEPTED') return 'solved'
+  if (v === 'PENDING') return 'attempted'
+  return 'failed'
+}
+
+/** Label + theme-token tone per status (works on light + dark surfaces via the accent tokens). */
+export const STATUS_META: Record<ProblemStatus, { label: string; tone: string }> = {
+  solved: { label: 'Solved', tone: 'text-accent-2' },
+  attempted: { label: 'Attempted', tone: 'text-ink-soft' },
+  failed: { label: 'Failed', tone: 'text-accent' },
+}

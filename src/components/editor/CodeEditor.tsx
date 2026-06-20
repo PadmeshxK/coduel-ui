@@ -1,22 +1,101 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import Editor, { type BeforeMount, type OnMount } from '@monaco-editor/react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react'
+import Editor, { useMonaco, type BeforeMount, type OnMount } from '@monaco-editor/react'
 import { EditorPanel } from '../ui/EditorPanel'
 import { LanguageSelect } from '../ui/LanguageSelect'
 import { executionApi } from '../../lib/api'
 import { MONACO_LANGUAGE } from '../../lib/languages'
 import { clampOutput } from '../../lib/truncate'
-import type { Language, TestCaseData } from '../../types'
+import { VERDICT_LABEL } from '../../lib/verdict'
+import { registerCompletions } from '../../lib/monacoCompletions'
+import type { ExecutionData, Language, SubmissionData, TestCaseData } from '../../types'
 
 const MOD =
   typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent) ? '⌘' : 'Ctrl'
 
 const defineTheme: BeforeMount = (monaco) => {
+  // Dark — warm espresso surface, brand syntax tones (oxblood keywords, green strings, gold numbers).
   monaco.editor.defineTheme('coduel', {
     base: 'vs-dark',
     inherit: true,
-    rules: [],
-    colors: { 'editor.background': '#1a1510' },
+    rules: [
+      { token: 'comment', foreground: 'a2937c', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'cb5b45' },
+      { token: 'operator', foreground: 'cb5b45' },
+      { token: 'string', foreground: '74b394' },
+      { token: 'number', foreground: 'cba15c' },
+      { token: 'constant', foreground: 'cba15c' },
+      { token: 'type', foreground: 'd9a866' },
+      { token: 'type.identifier', foreground: 'd9a866' },
+      { token: 'delimiter', foreground: 'a2937c' },
+    ],
+    colors: {
+      'editor.background': '#191410',
+      'editor.foreground': '#f1e9db',
+      'editorLineNumber.foreground': '#5c5142',
+      'editorLineNumber.activeForeground': '#a2937c',
+      'editorCursor.foreground': '#cb5b45',
+      'editor.selectionBackground': '#3a3025',
+      'editor.lineHighlightBackground': '#221a13',
+      'editor.lineHighlightBorder': '#00000000',
+      'editorIndentGuide.background': '#2a2219',
+      'editorIndentGuide.activeBackground': '#3a3025',
+      'editorWhitespace.foreground': '#2a2219',
+      'editorGutter.background': '#191410',
+    },
   })
+  // Light — cream paper, the same brand tones tuned for contrast on a warm background.
+  monaco.editor.defineTheme('coduel-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '9a8f78', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '9e3b2a' },
+      { token: 'operator', foreground: '9e3b2a' },
+      { token: 'string', foreground: '2e6b4f' },
+      { token: 'number', foreground: 'a9762a' },
+      { token: 'constant', foreground: 'a9762a' },
+      { token: 'type', foreground: '8a5a14' },
+      { token: 'type.identifier', foreground: '8a5a14' },
+      { token: 'delimiter', foreground: '6b6354' },
+    ],
+    colors: {
+      'editor.background': '#f4efe6',
+      'editor.foreground': '#2b2119',
+      'editorLineNumber.foreground': '#b7ab95',
+      'editorLineNumber.activeForeground': '#6b6354',
+      'editorCursor.foreground': '#9e3b2a',
+      'editor.selectionBackground': '#e4d8c1',
+      'editor.lineHighlightBackground': '#ece3d2',
+      'editor.lineHighlightBorder': '#00000000',
+      'editorIndentGuide.background': '#e2d8c4',
+      'editorIndentGuide.activeBackground': '#cfc3aa',
+      'editorWhitespace.foreground': '#ddd3bf',
+      'editorGutter.background': '#f4efe6',
+    },
+  })
+}
+
+// The site theme lives on <html data-theme>; useTheme keeps per-call state, so observe the DOM to
+// react to toggles fired anywhere. Maps the site theme to the matching Monaco theme name.
+function useMonacoTheme(): string {
+  const read = () =>
+    typeof document !== 'undefined' && document.documentElement.dataset.theme === 'dark'
+      ? 'coduel'
+      : 'coduel-light'
+  const [name, setName] = useState(read)
+  useEffect(() => {
+    const el = document.documentElement
+    const obs = new MutationObserver(() => setName(read()))
+    obs.observe(el, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => obs.disconnect()
+  }, [])
+  return name
 }
 
 const EDITOR_OPTIONS = {
@@ -30,6 +109,10 @@ const EDITOR_OPTIONS = {
   tabSize: 4,
   insertSpaces: true,
   automaticLayout: true,
+  quickSuggestions: true,
+  suggestOnTriggerCharacters: true,
+  tabCompletion: 'on' as const,
+  acceptSuggestionOnEnter: 'smart' as const,
   renderWhitespace: 'selection' as const,
   cursorBlinking: 'smooth' as const,
   smoothScrolling: true,
@@ -40,16 +123,6 @@ const EDITOR_OPTIONS = {
   hideCursorInOverviewRuler: true,
 }
 
-export interface CaseResult {
-  label: string
-  expected: string
-  output: string
-  stderr: string
-  exitCode: number
-  durationMs: number
-  passed: boolean | null
-}
-
 interface CodeEditorProps {
   language: Language
   onLanguageChange: (l: Language) => void
@@ -57,6 +130,11 @@ interface CodeEditorProps {
   onCodeChange: (c: string) => void
   /** Read-only sample cases from the problem. */
   samples: TestCaseData[]
+  /** Practice only: when set, the editor shows this past submission read-only, with the action
+   *  toolbar hidden and the console retracted. Null/undefined = the live editable buffer. */
+  viewingSubmission?: SubmissionData | null
+  /** Called by the header "Back to editor" button while viewing a submission. */
+  onCloseSubmission?: () => void
   filename: string
   /** Page-owned submit: network + result state. The editor only manages busy + which tab shows. */
   onSubmit: () => Promise<void>
@@ -74,6 +152,7 @@ interface CodeEditorProps {
 const MIN_CONSOLE = 120
 const MAX_CONSOLE = 640
 const DIVIDER_H = 16 // h-4 grab strip
+const MAX_CUSTOM_CASES = 5
 
 type Tab = 'output' | 'tests'
 type LastAction = 'run' | 'submit' | null
@@ -84,6 +163,8 @@ export function CodeEditor({
   code,
   onCodeChange,
   samples,
+  viewingSubmission,
+  onCloseSubmission,
   filename,
   onSubmit,
   submitView,
@@ -123,18 +204,45 @@ export function CodeEditor({
     }
   }
   const [lastAction, setLastAction] = useState<LastAction>(null)
-  const [results, setResults] = useState<CaseResult[] | null>(null)
+  const [runResult, setRunResult] = useState<ExecutionData | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const [customCases, setCustomCases] = useState<
     { id: number; input: string; expected: string }[]
   >([])
   const nextCaseId = useRef(1)
 
   const addCase = () =>
-    setCustomCases((c) => [...c, { id: nextCaseId.current++, input: '', expected: '' }])
+    setCustomCases((c) =>
+      c.length >= MAX_CUSTOM_CASES ? c : [...c, { id: nextCaseId.current++, input: '', expected: '' }],
+    )
   const removeCase = (id: number) => setCustomCases((c) => c.filter((x) => x.id !== id))
   const updateCase = (id: number, field: 'input' | 'expected', value: string) =>
     setCustomCases((c) => c.map((x) => (x.id === id ? { ...x, [field]: value } : x)))
+
+  // Viewing a past submission retracts the console (remembering its prior open state) and restores
+  // it on return — the height transition animates both smoothly.
+  const consoleBeforeView = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (viewingSubmission) {
+      if (consoleBeforeView.current === null) consoleBeforeView.current = open
+      setOpen(false)
+    } else if (consoleBeforeView.current !== null) {
+      setOpen(consoleBeforeView.current)
+      consoleBeforeView.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewingSubmission])
+
+  // Monaco follows the site theme (light/dark) at runtime + gets per-language autocomplete.
+  const monaco = useMonaco()
+  const editorTheme = useMonacoTheme()
+  useEffect(() => {
+    if (monaco) registerCompletions(monaco)
+  }, [monaco])
+  useEffect(() => {
+    monaco?.editor.setTheme(editorTheme)
+  }, [monaco, editorTheme])
 
   const canAct = !disabled && busy === null && code.trim() !== ''
   const totalCases = samples.length + customCases.length
@@ -143,39 +251,20 @@ export function CodeEditor({
     setBusy('run')
     setLastAction('run')
     setRunError(null)
-    setResults(null)
+    setRunResult(null)
     setTab('output')
     setOpen(true)
     try {
-      const sampleRuns = samples.map((c, i) => ({
-        input: c.input,
-        expectedOutput: c.expectedOutput,
-        label: `Sample ${i + 1}`,
-      }))
-      const customRuns = customCases.map((c, i) => ({
-        input: c.input,
-        expectedOutput: c.expected,
-        label: `Custom ${i + 1}`,
-      }))
-      let toRun = [...sampleRuns, ...customRuns]
-      if (toRun.length === 0) toRun = [{ input: '', expectedOutput: '', label: 'Run' }]
+      const testCases = [
+        ...samples.map((c) => ({ input: c.input, expectedOutput: c.expectedOutput })),
+        ...customCases.map((c) => ({ input: c.input, expectedOutput: c.expected })),
+      ]
+      // Nothing to run against → a single empty-stdin run so the user still sees output.
+      if (testCases.length === 0) testCases.push({ input: '', expectedOutput: '' })
 
-      const out = await Promise.all(
-        toRun.map(async (tc): Promise<CaseResult> => {
-          const r = await executionApi.execute({ language, code, stdin: tc.input })
-          const hasExpected = tc.expectedOutput.trim() !== ''
-          return {
-            label: tc.label,
-            expected: tc.expectedOutput,
-            output: clampOutput(r.stdout),
-            stderr: clampOutput(r.stderr),
-            exitCode: r.exitCode,
-            durationMs: r.durationMs,
-            passed: hasExpected ? r.stdout.trim() === tc.expectedOutput.trim() : null,
-          }
-        }),
-      )
-      setResults(out)
+      // Same path as Submit: the backend compiles once, runs every case, and judges them.
+      const data = await executionApi.execute({ language, code, testCases })
+      setRunResult(data)
     } catch (e) {
       setRunError(e instanceof Error ? e.message : 'Run failed')
     } finally {
@@ -187,13 +276,23 @@ export function CodeEditor({
     setBusy('submit')
     setLastAction('submit')
     setRunError(null)
-    setResults(null)
+    setRunResult(null)
     setTab('output')
     setOpen(true)
     try {
       await onSubmit()
     } finally {
       setBusy(null)
+    }
+  }
+
+  async function copyCode(text: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard blocked — ignore */
     }
   }
 
@@ -210,9 +309,7 @@ export function CodeEditor({
     )
   }
 
-  const passedCount = results?.filter((r) => r.passed === true).length ?? 0
-  const judgeable = results?.filter((r) => r.passed !== null).length ?? 0
-  const totalMs = results?.reduce((s, r) => s + r.durationMs, 0) ?? 0
+  const viewing = viewingSubmission ?? null
 
   return (
     <div className={`flex min-h-0 flex-col ${className}`}>
@@ -220,41 +317,68 @@ export function CodeEditor({
         fill
         className="min-h-0 flex-1"
         toolbar={
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <ChromeButton onClick={() => setOpen((o) => !o)} title="Toggle console">
-              {'>_ Console'}
-            </ChromeButton>
-            <LanguageSelect value={language} onChange={onLanguageChange} />
-            <ChromeButton
-              onClick={handleRun}
-              disabled={!canAct}
-              title={`Run (${MOD}+↵)`}
-              hint={`${MOD} ↵`}
-            >
-              {busy === 'run' ? 'Running…' : 'Run'}
-            </ChromeButton>
-            <ChromeButton
-              primary
-              onClick={handleSubmit}
-              disabled={!canAct}
-              title={`Submit (${MOD}+⇧+↵)`}
-              hint={`${MOD} ⇧ ↵`}
-            >
-              {busy === 'submit' ? 'Submitting…' : 'Submit'}
-            </ChromeButton>
-          </div>
+          viewing ? (
+            <div key="sub-toolbar" className="flex items-center gap-2.5">
+              <span className="hidden font-mono text-[11px] text-ink-soft sm:inline">
+                read-only · #{viewing.submissionId} ·{' '}
+                <span className="lowercase">{viewing.language}</span>
+              </span>
+              <ChromeButton onClick={() => copyCode(viewing.sourceCode)} title="Copy code to clipboard">
+                {copied ? 'Copied ✓' : 'Copy'}
+              </ChromeButton>
+              <ChromeButton primary onClick={() => onCloseSubmission?.()} title="Back to the editor">
+                ← Back to editor
+              </ChromeButton>
+            </div>
+          ) : (
+            <div key="edit-toolbar" className="flex items-center justify-end gap-2">
+              <ChromeButton onClick={() => setOpen((o) => !o)} title="Toggle console">
+                {'>_ Console'}
+              </ChromeButton>
+              <LanguageSelect value={language} onChange={onLanguageChange} disabled={disabled} />
+              <ChromeButton
+                onClick={handleRun}
+                disabled={!canAct}
+                title={`Run (${MOD}+↵)`}
+                hint={`${MOD} ↵`}
+              >
+                {busy === 'run' ? 'Running…' : 'Run'}
+              </ChromeButton>
+              <ChromeButton
+                primary
+                onClick={handleSubmit}
+                disabled={!canAct}
+                title={`Submit (${MOD}+⇧+↵)`}
+                hint={`${MOD} ⇧ ↵`}
+              >
+                {busy === 'submit' ? 'Submitting…' : 'Submit'}
+              </ChromeButton>
+            </div>
+          )
         }
       >
-        <Editor
-          height="100%"
-          language={MONACO_LANGUAGE[language]}
-          theme="coduel"
-          beforeMount={defineTheme}
-          onMount={handleMount}
-          value={code}
-          onChange={(v) => onCodeChange(v ?? '')}
-          options={EDITOR_OPTIONS}
-        />
+        {viewing ? (
+          <Editor
+            key={`sub-${viewing.submissionId}`}
+            height="100%"
+            language={MONACO_LANGUAGE[viewing.language]}
+            theme={editorTheme}
+            beforeMount={defineTheme}
+            value={viewing.sourceCode}
+            options={{ ...EDITOR_OPTIONS, readOnly: true }}
+          />
+        ) : (
+          <Editor
+            height="100%"
+            language={MONACO_LANGUAGE[language]}
+            theme={editorTheme}
+            beforeMount={defineTheme}
+            onMount={handleMount}
+            value={code}
+            onChange={(v) => onCodeChange(v ?? '')}
+            options={{ ...EDITOR_OPTIONS, readOnly: disabled }}
+          />
+        )}
       </EditorPanel>
 
       {/* console — animated open/close (height eases so the editor grows/shrinks smoothly) + drag-resize */}
@@ -280,16 +404,16 @@ export function CodeEditor({
             className={`rounded-full transition-all duration-200 ease-out ${
               dragging
                 ? 'h-[3px] w-20 bg-accent'
-                : 'h-[3px] w-12 bg-white/15 group-hover:w-16 group-hover:bg-accent/70'
+                : 'h-[3px] w-12 bg-black/15 group-hover:w-16 group-hover:bg-accent/70 dark:bg-white/15'
             }`}
           />
         </div>
 
         <div
           style={{ height: consoleHeight }}
-          className="reflective flex flex-col overflow-hidden rounded-[14px] border border-black/60 bg-[#120e09]"
+          className="reflective flex flex-col overflow-hidden rounded-[14px] border border-line bg-paper-2"
         >
-            <div className="flex items-center gap-1 border-b border-white/10 bg-white/[0.03] px-3 py-1.5">
+            <div className="flex items-center gap-1 border-b border-line bg-black/[0.03] px-3 py-1.5 dark:bg-white/[0.03]">
               <ConsoleTab active={tab === 'output'} onClick={() => setTab('output')}>
                 Output
               </ConsoleTab>
@@ -297,15 +421,15 @@ export function CodeEditor({
                 Tests · {totalCases}
               </ConsoleTab>
               {busy && (
-                <span className="ml-2 flex items-center gap-1.5 font-mono text-[11px] text-[#caa15c]">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#caa15c]" />
+                <span className="ml-2 flex items-center gap-1.5 font-mono text-[11px] text-gold">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold" />
                   {busy === 'run' ? 'running' : 'judging'}
                 </span>
               )}
               <button
                 onClick={() => setOpen(false)}
                 title="Close console"
-                className="ml-auto rounded px-2 py-0.5 font-mono text-sm text-[#8a7c66] transition hover:text-[#e7d9bd]"
+                className="ml-auto rounded px-2 py-0.5 font-mono text-sm text-ink-soft transition hover:text-ink"
               >
                 ✕
               </button>
@@ -323,19 +447,16 @@ export function CodeEditor({
                   updateCase={updateCase}
                 />
               ) : (
-                <div className="font-mono text-[12.5px] leading-[1.7] text-[#d8cdb4]">
+                <div className="font-mono text-[12.5px] leading-[1.7] text-ink-soft">
                   <OutputPanel
                     busy={busy}
                     disabled={disabled}
                     disabledHint={disabledHint}
                     lastAction={lastAction}
-                    results={results}
+                    runResult={runResult}
                     runError={runError}
                     submitView={submitView}
                     filename={filename}
-                    passedCount={passedCount}
-                    judgeable={judgeable}
-                    totalMs={totalMs}
                   />
                 </div>
               )}
@@ -361,7 +482,9 @@ function ConsoleTab({
     <button
       onClick={onClick}
       className={`rounded-md px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.16em] transition ${
-        active ? 'bg-white/[0.08] text-[#e7d9bd]' : 'text-[#8a7c66] hover:text-[#d8cdb4]'
+        active
+          ? 'bg-black/[0.06] text-ink dark:bg-white/[0.08]'
+          : 'text-ink-soft hover:text-ink'
       }`}
     >
       {children}
@@ -391,13 +514,13 @@ function ChromeButton({
       title={title}
       className={`inline-flex items-center rounded-md px-3 py-1.5 font-mono text-xs transition disabled:opacity-40 ${
         primary
-          ? 'bg-accent text-white hover:brightness-110'
-          : 'border border-white/15 bg-white/[0.06] text-[#e7d9bd] hover:bg-white/[0.12]'
+          ? 'border border-transparent bg-accent text-white hover:brightness-110'
+          : 'border border-line bg-black/[0.04] text-ink hover:bg-black/[0.08] dark:bg-white/[0.06] dark:hover:bg-white/[0.12]'
       }`}
     >
       {children}
       {hint && (
-        <span className="ml-1.5 hidden rounded bg-black/25 px-1.5 py-0.5 text-[10px] opacity-70 lg:inline">
+        <span className="ml-1.5 hidden rounded bg-black/10 px-1.5 py-0.5 text-[10px] opacity-70 lg:inline dark:bg-black/25">
           {hint}
         </span>
       )}
@@ -405,7 +528,7 @@ function ChromeButton({
   )
 }
 
-/* ---------- tests tab (dark-themed cases editor) ---------- */
+/* ---------- tests tab (themed cases editor) ---------- */
 
 function TestsPanel({
   samples,
@@ -460,9 +583,9 @@ function TestsPanel({
               className={`group flex shrink-0 items-center gap-2 rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] transition ${
                 on
                   ? custom
-                    ? 'border-[#caa15c]/60 bg-[#caa15c]/[0.12] text-[#e8cf9e]'
-                    : 'border-white/20 bg-white/[0.1] text-[#e7d9bd]'
-                  : 'border-white/10 text-[#8a7c66] hover:text-[#d8cdb4]'
+                    ? 'border-gold/60 bg-gold/[0.12] text-gold'
+                    : 'border-line bg-black/[0.06] text-ink dark:bg-white/[0.1]'
+                  : 'border-line text-ink-soft hover:text-ink'
               }`}
             >
               {it.label}
@@ -475,7 +598,7 @@ function TestsPanel({
                     removeCase(it.id)
                     setSel((s) => Math.max(0, s - 1))
                   }}
-                  className="text-[#8a7c66] transition hover:text-[#cf6b54]"
+                  className="text-ink-soft transition hover:text-accent"
                 >
                   ✕
                 </span>
@@ -483,15 +606,17 @@ function TestsPanel({
             </button>
           )
         })}
-        <button
-          onClick={() => {
-            addCase()
-            setSel(items.length) // newly appended custom case
-          }}
-          className="shrink-0 rounded-lg border border-dashed border-white/15 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-[#8a7c66] transition hover:border-[#caa15c] hover:text-[#caa15c]"
-        >
-          + Case
-        </button>
+        {customCases.length < MAX_CUSTOM_CASES && (
+          <button
+            onClick={() => {
+              addCase()
+              setSel(items.length) // newly appended custom case
+            }}
+            className="shrink-0 rounded-lg border border-dashed border-line px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft transition hover:border-gold hover:text-gold"
+          >
+            + Case
+          </button>
+        )}
       </div>
 
       {/* roomy side-by-side inspector for the selected case */}
@@ -503,7 +628,7 @@ function TestsPanel({
                 value={active.input}
                 onChange={(e) => updateCase(active.id, 'input', e.target.value)}
                 placeholder="stdin…"
-                className="h-full w-full resize-none rounded-lg border border-white/10 bg-white/[0.03] p-3 font-mono text-[12.5px] text-[#e7d9bd] outline-none transition placeholder:text-[#6b6354] focus:border-[#caa15c]"
+                className="h-full w-full resize-none rounded-lg border border-line bg-black/[0.02] p-3 font-mono text-[12.5px] text-ink outline-none transition placeholder:text-ink-soft/70 focus:border-gold dark:bg-white/[0.03]"
               />
             ) : (
               <CaseText value={active.input} />
@@ -515,7 +640,7 @@ function TestsPanel({
                 value={active.expected}
                 onChange={(e) => updateCase(active.id, 'expected', e.target.value)}
                 placeholder="expected output…"
-                className="h-full w-full resize-none rounded-lg border border-white/10 bg-white/[0.03] p-3 font-mono text-[12.5px] text-[#e7d9bd] outline-none transition placeholder:text-[#6b6354] focus:border-[#caa15c]"
+                className="h-full w-full resize-none rounded-lg border border-line bg-black/[0.02] p-3 font-mono text-[12.5px] text-ink outline-none transition placeholder:text-ink-soft/70 focus:border-gold dark:bg-white/[0.03]"
               />
             ) : (
               <CaseText value={active.expected} />
@@ -523,7 +648,7 @@ function TestsPanel({
           </Field>
         </div>
       ) : (
-        <div className="mt-3 flex flex-1 items-center justify-center font-mono text-[12px] text-[#8a7c66]">
+        <div className="mt-3 flex flex-1 items-center justify-center font-mono text-[12px] text-ink-soft">
           No test cases — add one to run against your own input.
         </div>
       )}
@@ -534,7 +659,7 @@ function TestsPanel({
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-h-0 flex-col">
-      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[#8a7c66]">
+      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-soft">
         {label}
       </div>
       <div className="min-h-[88px] flex-1">{children}</div>
@@ -544,8 +669,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function CaseText({ value }: { value: string }) {
   return (
-    <div className="h-full w-full overflow-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-white/[0.03] p-3 font-mono text-[12.5px] text-[#d8cdb4]">
-      {value.trim() || <span className="text-[#6b6354]">(empty)</span>}
+    <div className="h-full w-full overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-black/[0.02] p-3 font-mono text-[12.5px] text-ink-soft dark:bg-white/[0.03]">
+      {value.trim() || <span className="text-ink-soft/60">(empty)</span>}
     </div>
   )
 }
@@ -555,7 +680,34 @@ function CaseText({ value }: { value: string }) {
 function Prompt({ cmd }: { cmd: string }) {
   return (
     <div>
-      <span className="text-[#7FB47A]">$</span> <span className="text-[#e7d9bd]">{cmd}</span>
+      <span className="text-accent-2">$</span> <span className="text-ink">{cmd}</span>
+    </div>
+  )
+}
+
+// A labelled output block that preserves newlines/whitespace (so multi-line stdout renders properly).
+function OutBlock({
+  label,
+  children,
+  tone,
+}: {
+  label: string
+  children: string
+  tone?: 'accent'
+}) {
+  const text = clampOutput(children).replace(/\s+$/, '')
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-ink-soft">
+        {label}
+      </div>
+      <pre
+        className={`max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-black/[0.02] p-2.5 font-mono text-[12px] leading-[1.5] dark:bg-white/[0.03] ${
+          tone === 'accent' ? 'text-accent' : 'text-ink'
+        }`}
+      >
+        {text || '(empty)'}
+      </pre>
     </div>
   )
 }
@@ -565,31 +717,25 @@ function OutputPanel({
   disabled,
   disabledHint,
   lastAction,
-  results,
+  runResult,
   runError,
   submitView,
   filename,
-  passedCount,
-  judgeable,
-  totalMs,
 }: {
   busy: null | 'run' | 'submit'
   disabled: boolean
   disabledHint?: string
   lastAction: LastAction
-  results: CaseResult[] | null
+  runResult: ExecutionData | null
   runError: string | null
   submitView?: ReactNode
   filename: string
-  passedCount: number
-  judgeable: number
-  totalMs: number
 }) {
   if (runError) {
     return (
       <>
         <Prompt cmd={`run ${filename}`} />
-        <div className="text-[#cf6b54]">error: {runError}</div>
+        <div className="text-accent">error: {runError}</div>
       </>
     )
   }
@@ -598,64 +744,59 @@ function OutputPanel({
     return (
       <>
         <Prompt cmd={`submit ${filename}`} />
-        {submitView ?? <div className="text-[#8a7c66]">submitted — see results.</div>}
+        {submitView ?? <div className="text-ink-soft">submitted — see results.</div>}
       </>
     )
   }
 
-  if (busy === 'run' && !results) {
+  if (busy === 'run' && !runResult) {
     return (
       <>
         <Prompt cmd={`run ${filename} --tests`} />
-        <div className="text-[#8a7c66]">running…</div>
+        <div className="text-ink-soft">running…</div>
       </>
     )
   }
 
-  if (results) {
+  if (runResult) {
+    const accepted = runResult.verdict === 'ACCEPTED'
+    const passed = runResult.passedTests ?? 0
+    const showCompare = !accepted && runResult.verdict !== 'COMPILE_ERROR'
     return (
       <>
-        <Prompt cmd={`run ${filename} --tests`} />
-        {results.map((r, i) => (
-          <div key={i}>
-            <span className="text-[#8a7c66]">{r.label}</span>
+        {/* line 1 — verdict · passed/total · runtime */}
+        <div className="mb-2">
+          <span className={accepted ? 'text-accent-2' : 'text-accent'}>
+            {VERDICT_LABEL[runResult.verdict]}
+          </span>
+          <span className="text-ink-soft">
             {'  '}
-            <span
-              className={
-                r.passed === false
-                  ? 'text-[#cf6b54]'
-                  : r.passed
-                    ? 'text-[#7FB47A]'
-                    : 'text-[#8a7c66]'
-              }
-            >
-              {r.passed === false ? 'FAIL' : r.passed ? 'PASS' : 'done'}
-            </span>
-            {'  '}
-            <span className="text-[#8a7c66]">{r.durationMs}ms</span>
-            {r.passed === false && (
-              <div className="pl-6 text-[#8a7c66]">
-                <div>
-                  expected&nbsp;&nbsp;
-                  <span className="text-[#d8cdb4]">{r.expected.trim() || '(empty)'}</span>
-                </div>
-                <div>
-                  got&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-                  <span className="text-[#d8cdb4]">{r.output.trim() || '(empty)'}</span>
-                </div>
-              </div>
-            )}
-            {r.stderr && (
-              <div className="pl-6 text-[#cf6b54]">stderr&nbsp;&nbsp;&nbsp;&nbsp;{r.stderr.trim()}</div>
-            )}
+            {passed}/{runResult.totalTests} passed · {runResult.durationMs}ms
+          </span>
+        </div>
+
+        {runResult.verdict === 'COMPILE_ERROR' && runResult.compilerLogs && (
+          <OutBlock label="Compiler" tone="accent">{runResult.compilerLogs}</OutBlock>
+        )}
+
+        {/* failure — input on its own line, then expected vs got side by side */}
+        {showCompare && (
+          <div className="space-y-2">
+            {runResult.failedInput != null && <OutBlock label="Input">{runResult.failedInput}</OutBlock>}
+            <div className="grid grid-cols-2 gap-2">
+              <OutBlock label="Expected">{runResult.expectedOutput ?? ''}</OutBlock>
+              <OutBlock label="Got" tone="accent">{runResult.stdout ?? ''}</OutBlock>
+            </div>
           </div>
-        ))}
-        {judgeable > 0 && (
+        )}
+
+        {accepted && (runResult.stdout ?? '').trim() && (
+          <OutBlock label="Output">{runResult.stdout ?? ''}</OutBlock>
+        )}
+
+        {(runResult.stderr ?? '').trim() && (
           <div className="mt-2">
-            <span className={passedCount === judgeable ? 'text-[#7FB47A]' : 'text-[#cf6b54]'}>
-              {passedCount}/{judgeable} passed
-            </span>
-            <span className="text-[#8a7c66]"> · {totalMs}ms</span>
+            <OutBlock label="stderr" tone="accent">{runResult.stderr ?? ''}</OutBlock>
           </div>
         )}
       </>
@@ -663,8 +804,8 @@ function OutputPanel({
   }
 
   if (disabled && disabledHint) {
-    return <div className="text-[#8a7c66]">{disabledHint}</div>
+    return <div className="text-ink-soft">{disabledHint}</div>
   }
 
-  return <div className="text-[#8a7c66]">Run to test, or Submit to judge against all tests.</div>
+  return <div className="text-ink-soft">Run to test, or Submit to judge against all tests.</div>
 }

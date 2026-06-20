@@ -3,7 +3,7 @@
   Keep this in sync with the Java side — it's the contract between the two.
 */
 
-export type Language = 'PYTHON'
+export type Language = 'PYTHON' | 'CPP'
 
 export type Verdict =
   | 'PENDING'
@@ -16,7 +16,7 @@ export type Verdict =
 
 export type MatchmakingStatus = 'WAITING' | 'MATCHED'
 
-export type MatchEventType = 'MATCH_READY' | 'SUBMISSION_JUDGED' | 'MATCH_OVER'
+export type MatchEventType = 'MATCH_READY' | 'SUBMISSION_JUDGED' | 'PLAYER_FORFEIT' | 'MATCH_OVER'
 
 /** Why a match ended (carried on MATCH_OVER). winnerUserId is null for NO_SHOW_VOID / TIMEOUT. */
 export type MatchEndReason =
@@ -26,7 +26,7 @@ export type MatchEndReason =
   | 'NO_SHOW_VOID'
   | 'TIMEOUT'
 
-/** GET /me/profile — the user's stored profile row (avatar defaults to the Google picture). */
+/** GET /user/profile — the user's stored profile row (avatar defaults to the Google picture). */
 export interface UserProfile {
   id: number
   email: string
@@ -40,11 +40,13 @@ export interface MatchParticipantData {
   userId: number
   displayName: string | null
   avatarUrl: string | null
+  forfeit: boolean
 }
 
-/** GET /matches/{id} — the duel's problem + both players. */
+/** GET /match/{id} — the duel's problem + both players. */
 export interface MatchData {
   matchId: number
+  roomId: number | null // set when this match belongs to a private room (drives "back to lobby")
   state: MatchState
   slug: string
   problemTitle: string
@@ -59,7 +61,7 @@ export interface TestCaseData {
   expectedOutput: string
 }
 
-/** GET /problems/{slug} — visible test cases only. */
+/** GET /problem/{slug} — visible test cases only. */
 export interface ProblemData {
   id: number
   slug: string
@@ -67,6 +69,10 @@ export interface ProblemData {
   statement: string
   timeLimitMs: number
   testCases: TestCaseData[]
+  /** Latest verdict for the signed-in user — set on the list (GET /problem). */
+  status?: Verdict | null
+  /** The signed-in user's submissions for this problem — set on GET /problem/{slug}. */
+  submissions?: SubmissionData[]
 }
 
 export interface PageData<T> {
@@ -86,23 +92,27 @@ export interface LeaderboardData {
   losses: number
 }
 
-/** POST /code/execute */
+/** POST /code/execute — run code against a list of test cases, judged synchronously (same as Submit). */
 export interface ExecutionForm {
   language: Language
   code: string
-  stdin?: string
+  testCases: { input: string; expectedOutput: string }[]
   timeoutMs?: number
 }
 
 export interface ExecutionData {
-  stdout: string
-  stderr: string
-  exitCode: number
-  timedOut: boolean
+  verdict: Verdict
+  passedTests: number | null
+  totalTests: number
   durationMs: number
+  stdout: string | null
+  stderr: string | null
+  failedInput: string | null
+  expectedOutput: string | null
+  compilerLogs: string | null
 }
 
-/** POST /submissions (userId comes from the session, never the body). */
+/** POST /submission (userId comes from the session, never the body). */
 export interface SubmissionForm {
   problemId: number
   matchId?: number
@@ -120,6 +130,8 @@ export interface SubmissionData {
   runtimeMs: number | null
   passedTests: number | null
   totalTests: number | null
+  createdAtMs: number | null
+  sourceCode: string
 }
 
 /** POST /matchmaking/join · GET /matchmaking/status */
@@ -129,7 +141,7 @@ export interface MatchmakingData {
   problemId: number | null
 }
 
-/** WebSocket payload on /topic/match/{matchId}. */
+/** Match-phase payload on /topic/match/{matchId}. */
 export interface MatchEventData {
   type: MatchEventType
   submissionId?: number
@@ -141,8 +153,69 @@ export interface MatchEventData {
   endReason?: MatchEndReason
 }
 
+/** Public view of a user (no email) — a friend, or a search hit you can add. */
+export interface FriendData {
+  userId: number
+  displayName: string | null
+  avatarUrl: string | null
+}
+
+/** GET /friend/request — an incoming friend request. */
+export interface FriendRequestData {
+  requestId: number
+  userId: number
+  displayName: string | null
+  avatarUrl: string | null
+  createdAtMs: number | null
+}
+
 /** Backend error envelope (com.coduel.common.data.ErrorData). */
 export interface ApiError {
   status: string
   message: string
+}
+
+// ===== Room (persistent private lobby; spawns N-player matches) =====
+
+export type RoomState = 'OPEN' | 'CLOSED'
+
+export interface RoomParticipantData {
+  userId: number
+  displayName: string | null
+  avatarUrl: string | null
+  host: boolean
+  ready: boolean
+}
+
+/** GET /room/{id} — the persistent lobby. activeMatchId is the in-progress game, or null when idle. */
+export interface RoomData {
+  roomId: number
+  state: RoomState
+  host: boolean
+  maxPlayers: number
+  participants: RoomParticipantData[]
+  activeMatchId: number | null
+}
+
+/** Payload on /topic/room/{roomId} — the persistent lobby channel. */
+export type RoomEventType = 'ROSTER_CHANGED' | 'MATCH_STARTED' | 'ROOM_CLOSED'
+
+export interface RoomEventData {
+  type: RoomEventType
+  matchId?: number | null // MATCH_STARTED — the match to jump into
+}
+
+// ===== Notifications =====
+
+export type NotificationEventType = 'ROOM_INVITE' | 'FRIEND_REQUEST'
+
+/** Pushed over /user/queue/notification via STOMP, and returned by GET /notification on load. */
+export interface NotificationData {
+  type: NotificationEventType
+  roomId?: number | null // ROOM_INVITE — the room to join
+  requestId?: number | null // FRIEND_REQUEST — the request to accept/decline
+  fromUserId: number
+  fromDisplayName: string | null
+  fromAvatarUrl: string | null
+  createdAtMs?: number | null
 }

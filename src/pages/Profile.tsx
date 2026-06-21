@@ -1,20 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { SectionLabel } from '../components/ui/SectionLabel'
 import { Avatar } from '../components/ui/Avatar'
 import { useAuth } from '../hooks/useAuth'
-import { profileApi } from '../lib/api'
+import { profileApi, userApi } from '../lib/api'
 
 type UrlStatus = 'empty' | 'invalid' | 'loading' | 'ok' | 'error'
+type NameStatus = 'idle' | 'checking' | 'available' | 'taken'
 
 export function Profile() {
   const { user, refresh } = useAuth()
   const [displayName, setDisplayName] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
   const [urlStatus, setUrlStatus] = useState<UrlStatus>('empty')
+  const [nameStatus, setNameStatus] = useState<NameStatus>('idle')
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<null | 'saved' | string>(null)
+  const nameSeq = useRef(0)
 
   useEffect(() => {
     if (user) {
@@ -48,12 +51,38 @@ export function Profile() {
 
   const trimmedName = displayName.trim()
   const trimmedAvatar = avatarUrl.trim()
+  const nameChanged = trimmedName !== (user?.displayName ?? '')
+
+  // Live, case-sensitive availability — same check as the setup screen. Your own current name is
+  // always "available" (renaming to itself shouldn't flag a clash); only a changed name is queried.
+  useEffect(() => {
+    if (!trimmedName) {
+      setNameStatus('idle')
+      return
+    }
+    if (!nameChanged) {
+      setNameStatus('available')
+      return
+    }
+    const mine = ++nameSeq.current
+    setNameStatus('checking')
+    const t = setTimeout(() => {
+      userApi
+        .checkDisplayName(trimmedName)
+        .then((available) => {
+          if (mine === nameSeq.current) setNameStatus(available ? 'available' : 'taken')
+        })
+        .catch(() => {
+          if (mine === nameSeq.current) setNameStatus('idle')
+        })
+    }, 350)
+    return () => clearTimeout(t)
+  }, [trimmedName, nameChanged])
+
   const avatarOk = trimmedAvatar === '' || urlStatus === 'ok'
   const avatarChanged = trimmedAvatar !== (user?.avatarUrl ?? '')
-  const dirty =
-    trimmedName !== '' &&
-    avatarOk &&
-    (trimmedName !== (user?.displayName ?? '') || avatarChanged)
+  const nameOk = trimmedName !== '' && nameStatus === 'available'
+  const dirty = nameOk && avatarOk && (nameChanged || avatarChanged)
 
   // Preview the URL only once it's a loaded image; otherwise fall back to initials.
   const previewSrc = urlStatus === 'ok' ? trimmedAvatar : null
@@ -163,9 +192,20 @@ export function Profile() {
               className="mt-2.5 w-full rounded-xl border border-line bg-paper px-4 py-3 text-[15px] outline-none transition focus:border-accent"
             />
             <p className="mt-1.5 font-mono text-[11px] text-ink-soft">
-              Shown to opponents in duels and on the leaderboard.{' '}
-              <span>({trimmedName.length}/50 characters max)</span>
+              {trimmedName.length}/50 characters max
             </p>
+            {/* live availability — only while the name is being changed */}
+            {nameChanged && trimmedName !== '' && (
+              <div className="mt-1 font-mono text-[11px]">
+                {nameStatus === 'checking' && <span className="text-ink-soft">checking availability…</span>}
+                {nameStatus === 'available' && (
+                  <span className="text-accent-2">✓ “{trimmedName}” is available</span>
+                )}
+                {nameStatus === 'taken' && (
+                  <span className="text-accent">✗ “{trimmedName}” is already taken</span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* email (read-only) */}

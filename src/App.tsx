@@ -6,6 +6,7 @@ import { Solve } from './pages/Solve'
 import { MatchPage } from './pages/MatchPage'
 import { RoomPage } from './pages/RoomPage'
 import { Login } from './pages/Login'
+import { NameSetup } from './pages/NameSetup'
 import { Profile } from './pages/Profile'
 import { Friends } from './pages/Friends'
 import { Styleguide } from './pages/Styleguide'
@@ -91,8 +92,17 @@ function App() {
           />
         </Route>
 
-        {/* standalone — its own minimal header */}
+        {/* standalone — their own minimal header */}
         <Route path="/login" element={<Login />} />
+        {/* new-account name setup — auth required, but exempt from the setup gate itself */}
+        <Route
+          path="/setup"
+          element={
+            <RequireAuth allowUnnamed>
+              <NameSetup />
+            </RequireAuth>
+          }
+        />
 
         {/* catch-all 404 */}
         <Route path="*" element={<ErrorPage />} />

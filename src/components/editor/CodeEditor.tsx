@@ -624,24 +624,30 @@ function TestsPanel({
         <div className="mt-3 grid min-h-0 flex-1 grid-cols-2 gap-3">
           <Field label={active.kind === 'custom' ? 'Input · stdin' : 'Input'}>
             {active.kind === 'custom' ? (
-              <textarea
-                value={active.input}
-                onChange={(e) => updateCase(active.id, 'input', e.target.value)}
-                placeholder="stdin…"
-                className="h-full w-full resize-none rounded-lg border border-line bg-black/[0.02] p-3 font-mono text-[12.5px] text-ink outline-none transition placeholder:text-ink-soft/70 focus:border-gold dark:bg-white/[0.03]"
-              />
+              <div className="relative h-full">
+                <CopyButton text={active.input} />
+                <textarea
+                  value={active.input}
+                  onChange={(e) => updateCase(active.id, 'input', e.target.value)}
+                  placeholder="stdin…"
+                  className="h-full w-full resize-none rounded-lg border border-line bg-black/[0.02] p-3 font-mono text-[12.5px] text-ink outline-none transition placeholder:text-ink-soft/70 focus:border-gold dark:bg-white/[0.03]"
+                />
+              </div>
             ) : (
               <CaseText value={active.input} />
             )}
           </Field>
           <Field label={active.kind === 'custom' ? 'Expected · optional' : 'Expected output'}>
             {active.kind === 'custom' ? (
-              <textarea
-                value={active.expected}
-                onChange={(e) => updateCase(active.id, 'expected', e.target.value)}
-                placeholder="expected output…"
-                className="h-full w-full resize-none rounded-lg border border-line bg-black/[0.02] p-3 font-mono text-[12.5px] text-ink outline-none transition placeholder:text-ink-soft/70 focus:border-gold dark:bg-white/[0.03]"
-              />
+              <div className="relative h-full">
+                <CopyButton text={active.expected} />
+                <textarea
+                  value={active.expected}
+                  onChange={(e) => updateCase(active.id, 'expected', e.target.value)}
+                  placeholder="expected output…"
+                  className="h-full w-full resize-none rounded-lg border border-line bg-black/[0.02] p-3 font-mono text-[12.5px] text-ink outline-none transition placeholder:text-ink-soft/70 focus:border-gold dark:bg-white/[0.03]"
+                />
+              </div>
             ) : (
               <CaseText value={active.expected} />
             )}
@@ -669,9 +675,42 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function CaseText({ value }: { value: string }) {
   return (
-    <div className="h-full w-full overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-black/[0.02] p-3 font-mono text-[12.5px] text-ink-soft dark:bg-white/[0.03]">
-      {value.trim() || <span className="text-ink-soft/60">(empty)</span>}
+    <div className="relative h-full w-full">
+      <CopyButton text={value} />
+      <div className="h-full w-full overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-black/[0.02] p-3 font-mono text-[12.5px] text-ink-soft dark:bg-white/[0.03]">
+        {value.trim() || <span className="text-ink-soft/60">(empty)</span>}
+      </div>
     </div>
+  )
+}
+
+// Small copy-to-clipboard icon pinned to the top-right of a test-case box. Hidden when there's
+// nothing to copy; flips to a tick for a moment after copying.
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  if (!text.trim()) return null
+  return (
+    <button
+      type="button"
+      title="Copy"
+      onClick={() => {
+        void navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1200)
+      }}
+      className="absolute right-1.5 top-1.5 z-10 grid h-6 w-6 place-items-center rounded-md border border-line bg-paper/85 text-ink-soft backdrop-blur transition hover:border-ink-soft/50 hover:text-ink"
+    >
+      {copied ? (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="text-accent-2">
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+        </svg>
+      )}
+    </button>
   )
 }
 

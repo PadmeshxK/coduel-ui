@@ -53,6 +53,9 @@ export function RoomPage() {
 
   const seatRowRef = useRef<HTMLDivElement>(null)
   const prevRects = useRef<Map<string, DOMRect>>(new Map())
+  // True once WE choose to leave — suppresses room events (e.g. our own leave closing the room) so
+  // we don't flash the "closed" screen on the way out.
+  const leavingRef = useRef(false)
 
   // Decide what to render for a freshly-loaded room: jump into the active match if I'm still a live
   // player, wait in the lobby if I forfeited it, or show the normal lobby when nothing's running.
@@ -109,6 +112,7 @@ export function RoomPage() {
       reconnectDelay: 3000,
       onConnect: () => {
         client.subscribe(`/topic/room/${roomId}`, (frame) => {
+          if (leavingRef.current) return // we're on our way out — ignore our own leave's events
           try {
             const e = JSON.parse(frame.body) as RoomEventData
             if (e.type === 'ROSTER_CHANGED') {
@@ -211,12 +215,13 @@ export function RoomPage() {
     }
   }
 
-  async function handleLeave() {
-    try {
-      await roomApi.leave(roomId)
-    } finally {
-      navigate('/')
-    }
+  function handleLeave() {
+    // Go home immediately so the person leaving never sees the "room closed" screen — leaving as the
+    // host/last member closes the room, which would otherwise fire ROOM_CLOSED back to us before the
+    // redirect. The leave request finishes in the background.
+    leavingRef.current = true
+    void roomApi.leave(roomId).catch(() => {})
+    navigate('/', { replace: true })
   }
 
   // Re-sync after a failed action (e.g. the room closed underneath us): refresh the room so the
@@ -374,7 +379,7 @@ export function RoomPage() {
         </h1>
         <p className="mt-4 max-w-xl text-ink-soft">
           {room.host
-            ? 'Pull in your friends and hit start when you’re ready — the problem stays sealed until kickoff.'
+            ? 'Pull in your friends and hit start when you’re ready'
             : 'You’re in. Sit tight — the host drops everyone into the problem at the same moment.'}
         </p>
 

@@ -7,9 +7,11 @@ import { Avatar } from '../components/ui/Avatar'
 import { Button } from '../components/ui/Button'
 import { CodeEditor } from '../components/editor/CodeEditor'
 import { ConfettiCannon } from '../components/ui/ConfettiCannon'
+import { ProblemStatement } from '../components/ui/ProblemStatement'
 import { Loader } from '../components/ui/Loader'
 import { matchApi, problemApi, submissionApi } from '../lib/api'
 import { useAsync } from '../hooks/useAsync'
+import { useLenisBox } from '../hooks/useLenisBox'
 import { useMatchSocket } from '../hooks/useMatchSocket'
 import { useAuth } from '../hooks/useAuth'
 import { VERDICT_LABEL, verdictTone } from '../lib/verdict'
@@ -257,6 +259,11 @@ export function MatchPage() {
   const { connected } = useMatchSocket(matchId, handleEvent)
 
   const matchOver = ended
+
+  // Momentum smooth-scroll for the live left panel, matching the rest of the site. Re-measures when
+  // the arena mounts (started/over) so Lenis attaches once the scroller is actually on screen.
+  const problemScrollRef = useRef<HTMLDivElement>(null)
+  useLenisBox(problemScrollRef, [data?.match.matchId, started, matchOver])
 
   // When the match ends, let the result sit (enough to savour a win), then return everyone to where
   // they belong — home for duels, the room lobby for room games. A visible countdown ticks it down;
@@ -578,7 +585,8 @@ export function MatchPage() {
       {data && (started || matchOver) && (
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-[22px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] lg:grid-rows-none">
           {/* left — scoreboard + problem + feed (the live layer, page-owned) */}
-          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+          <div ref={problemScrollRef} className="min-h-0 overflow-y-auto pr-1">
+            <div className="flex flex-col gap-4">
             <Card>
               <SectionLabel>Scoreboard</SectionLabel>
               {participants.map((p, i) => {
@@ -647,9 +655,7 @@ export function MatchPage() {
             </Card>
 
             <Collapsible title="Problem" defaultOpen>
-              <p className="whitespace-pre-line font-display text-[18px] font-medium leading-[1.55]">
-                {data.problem.statement}
-              </p>
+              <ProblemStatement text={data.problem.statement} />
             </Collapsible>
 
             <Card>
@@ -668,6 +674,7 @@ export function MatchPage() {
                 )}
               </div>
             </Card>
+            </div>
           </div>
 
           {/* right — shared editor + console (disabled once the match is over) */}

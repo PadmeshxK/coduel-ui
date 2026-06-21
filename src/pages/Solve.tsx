@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import { Collapsible } from '../components/ui/Collapsible'
 import { CodeEditor } from '../components/editor/CodeEditor'
 import { ConfettiCannon } from '../components/ui/ConfettiCannon'
+import { ProblemStatement } from '../components/ui/ProblemStatement'
 import { Loader } from '../components/ui/Loader'
 import { Reveal } from '../components/ui/Reveal'
 import { StatusPill } from '../components/ui/StatusPill'
 import { problemApi, submissionApi } from '../lib/api'
+import { loadPracticeFilter } from '../lib/practiceFilter'
 import { useAsync } from '../hooks/useAsync'
+import { useLenisBox } from '../hooks/useLenisBox'
 import { VERDICT_LABEL, verdictTone } from '../lib/verdict'
 import { FILE_EXT } from '../lib/languages'
 import type { SubmissionData, Verdict, Language } from '../types'
@@ -21,6 +24,14 @@ const langKey = (slug?: string) => `coduel:lang:${slug ?? ''}`
 export function Solve() {
   const { slug } = useParams()
   const { data: problem, error } = useAsync(() => problemApi.getBySlug(slug!), [slug])
+  // Ordered slugs for the filter the user last browsed with — to offer the next problem in that set.
+  // Fetched once; recomputing `nextSlug` as the slug changes is enough as they walk the list.
+  const { data: filterSlugs } = useAsync(() => problemApi.slugs(loadPracticeFilter()), [])
+  const slugIndex = filterSlugs && slug ? filterSlugs.indexOf(slug) : -1
+  const nextSlug =
+    slugIndex >= 0 && filterSlugs && slugIndex < filterSlugs.length - 1
+      ? filterSlugs[slugIndex + 1]
+      : null
 
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState<Language>('PYTHON')
@@ -34,6 +45,10 @@ export function Solve() {
   const [showCelebration, setShowCelebration] = useState(false)
   // The past submission currently shown read-only in the editor (null = the live editable buffer).
   const [selectedSub, setSelectedSub] = useState<SubmissionData | null>(null)
+
+  // Momentum smooth-scroll for the problem panel, matching the rest of the site (re-measures per problem).
+  const problemScrollRef = useRef<HTMLDivElement>(null)
+  useLenisBox(problemScrollRef, [problem?.slug])
 
   const filename = `${slug ?? 'solution'}.${FILE_EXT[language]}`
 
@@ -56,6 +71,8 @@ export function Solve() {
   }, [slug])
 
   const latestSub = subs[0] ?? null
+  // Permanent solved state: any accepted attempt counts, even if a later submission was wrong.
+  const solved = subs.some((s) => s.verdict === 'ACCEPTED')
   const ready = !!problem
 
   // Cache the code + language per problem (practice only).
@@ -136,7 +153,8 @@ export function Solve() {
 
       {ready && problem && (
         <Reveal key={slug} className="flex min-h-0 flex-1 flex-col gap-4">
-          <div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
             <div className="font-mono text-[12px] text-ink-soft">
               <span className="text-accent-2">coduel</span>:
               <span className="text-accent">~/practice/{slug ?? 'two-sum'}</span> $
@@ -144,41 +162,77 @@ export function Solve() {
             <h1 className="mt-1.5 font-display text-[22px] font-extrabold leading-tight tracking-[-0.025em] sm:text-[26px] lg:text-[30px] lg:leading-none">
               {problem.title}
             </h1>
-            {latestSub && (
+            {solved ? (
+              <div className="mt-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-accent-2/40 bg-accent-2/10 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-accent-2">
+                  ✓ Solved
+                </span>
+              </div>
+            ) : latestSub ? (
               <div className="mt-2">
                 <StatusPill verdict={latestSub.verdict} />
               </div>
+            ) : null}
+
+            {/* rating + tags for this problem */}
+            {(problem.rating != null || (problem.tags && problem.tags.length > 0)) && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                {problem.rating != null && (
+                  <span className="rounded-md border border-gold/40 px-2 py-0.5 font-mono text-[11px] text-gold">
+                    rating {problem.rating}
+                  </span>
+                )}
+                {problem.tags?.map((t) => (
+                  <span
+                    key={t}
+                    className="rounded-md bg-black/[0.05] px-2 py-0.5 font-mono text-[11px] text-ink-soft dark:bg-white/[0.06]"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
+            </div>
+
+            {/* jump to the next problem in the filter the user browsed with (practice only) */}
+            {nextSlug && (
+              <Link
+                to={`/practice/${nextSlug}`}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-line bg-paper-2 px-4 py-2 font-mono text-[12px] uppercase tracking-[0.1em] text-ink-soft transition hover:border-ink-soft/50 hover:text-ink"
+              >
+                Next problem →
+              </Link>
             )}
           </div>
 
           <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-[22px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] lg:grid-rows-none">
             {/* left — problem + past submissions (test cases live in the editor console) */}
-            <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
-              <Collapsible title="Problem" defaultOpen>
-                <p className="whitespace-pre-line font-display text-[18px] font-medium leading-[1.55]">
-                  {problem.statement}
-                </p>
-              </Collapsible>
+            <div ref={problemScrollRef} className="min-h-0 overflow-y-auto pr-1">
+              <div className="flex flex-col gap-4">
+                <Collapsible title="Problem" defaultOpen>
+                  <ProblemStatement text={problem.statement} />
+                </Collapsible>
 
-              {subs.length > 0 && (
-                <div className="rounded-[14px] border border-line bg-paper-2 p-3">
-                  <div className="mb-2 px-1">
-                    <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-soft">
-                      Submissions · {subs.length}
-                    </span>
+                {subs.length > 0 && (
+                  <div className="rounded-[14px] border border-line bg-paper-2 p-3">
+                    <div className="mb-2 px-1">
+                      <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-soft">
+                        Submissions · {subs.length}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      {subs.map((s) => (
+                        <SubmissionRow
+                          key={s.submissionId}
+                          s={s}
+                          active={selectedSub?.submissionId === s.submissionId}
+                          onClick={() => setSelectedSub(s)}
+                        />
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    {subs.map((s) => (
-                      <SubmissionRow
-                        key={s.submissionId}
-                        s={s}
-                        active={selectedSub?.submissionId === s.submissionId}
-                        onClick={() => setSelectedSub(s)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {/* right — shared editor + console */}

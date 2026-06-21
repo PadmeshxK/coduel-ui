@@ -1,7 +1,9 @@
 import { http } from './http'
 import type {
+  ChallengeData,
   ExecutionData,
   ExecutionForm,
+  FilterOptionsData,
   FriendData,
   FriendRequestData,
   LeaderboardData,
@@ -10,6 +12,8 @@ import type {
   NotificationData,
   PageData,
   ProblemData,
+  ProblemSort,
+  ProblemStatusFilter,
   RoomData,
   SubmissionData,
   SubmissionForm,
@@ -27,11 +31,40 @@ export const authApi = {
   logout: () => http.post('/logout'),
 }
 
+export interface ProblemQuery {
+  page?: number
+  size?: number
+  q?: string
+  sort?: ProblemSort
+  ratings?: number[]
+  tags?: string[]
+  status?: ProblemStatusFilter
+}
+
+// Build the shared filter query params. Lists go as comma-joined (the backend form splits them);
+// ALL/empty values are omitted so they don't filter.
+function filterParams(query: ProblemQuery): Record<string, unknown> {
+  const { q, sort = 'rating-asc', ratings, tags, status } = query
+  const params: Record<string, unknown> = { sort }
+  if (q) params.q = q
+  if (status && status !== 'ALL') params.status = status
+  if (ratings?.length) params.ratings = ratings.join(',')
+  if (tags?.length) params.tags = tags.join(',')
+  return params
+}
+
 export const problemApi = {
-  getPage: (page = 0, size = 20) =>
+  getPage: (query: ProblemQuery = {}) =>
     http
-      .get<PageData<ProblemData>>('/problem', { params: { page, size } })
+      .get<PageData<ProblemData>>('/problem', {
+        params: { page: query.page ?? 0, size: query.size ?? 100, ...filterParams(query) },
+      })
       .then((r) => r.data),
+  // Ordered slugs for the active filter — drives the Solve page's "next problem" button.
+  slugs: (query: ProblemQuery = {}) =>
+    http.get<string[]>('/problem/slugs', { params: filterParams(query) }).then((r) => r.data),
+  filterOptions: () =>
+    http.get<FilterOptionsData>('/problem/filter-options').then((r) => r.data),
   getBySlug: (slug: string) =>
     http.get<ProblemData>(`/problem/${slug}`).then((r) => r.data),
 }
@@ -52,6 +85,11 @@ export const userApi = {
   // Public directory search by display-name prefix (for adding friends).
   search: (q: string) =>
     http.get<FriendData[]>('/user/search', { params: { q } }).then((r) => r.data),
+  // Live availability check for the name-setup / profile-edit UI (case-sensitive on the server).
+  checkDisplayName: (name: string) =>
+    http
+      .get<{ available: boolean }>('/user/display-name-available', { params: { name } })
+      .then((r) => r.data.available),
 }
 
 export const friendApi = {
@@ -67,6 +105,16 @@ export const matchmakingApi = {
   join: () => http.post<MatchmakingData>('/matchmaking/join').then((r) => r.data),
   status: () => http.get<MatchmakingData>('/matchmaking/status').then((r) => r.data),
   leave: () => http.post('/matchmaking/leave'),
+}
+
+export const challengeApi = {
+  // Challenge a friend to a duel → returns the challengeId so we can show "waiting…".
+  create: (userId: number) =>
+    http.post<ChallengeData>('/challenge', null, { params: { userId } }).then((r) => r.data),
+  // Accept a challenge sent to me → returns the matchId to jump into.
+  accept: (id: string) =>
+    http.post<ChallengeData>(`/challenge/${id}/accept`).then((r) => r.data),
+  decline: (id: string) => http.post(`/challenge/${id}/decline`),
 }
 
 export const matchApi = {

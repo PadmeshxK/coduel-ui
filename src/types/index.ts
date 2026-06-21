@@ -32,6 +32,8 @@ export interface UserProfile {
   email: string
   displayName: string | null
   avatarUrl: string | null
+  // False until the user picks a unique display name — the app routes them to /setup first.
+  displayNameSet: boolean
 }
 
 export type MatchState = 'ACTIVE' | 'FINISHED' | 'EXPIRED'
@@ -68,11 +70,26 @@ export interface ProblemData {
   title: string
   statement: string
   timeLimitMs: number
+  /** Difficulty rating (Codeforces-style); null when the source didn't provide one. */
+  rating?: number | null
+  /** Topic tags (e.g. "dp", "math"). */
+  tags?: string[]
   testCases: TestCaseData[]
   /** Latest verdict for the signed-in user — set on the list (GET /problem). */
   status?: Verdict | null
+  /** True if the user has ever solved it (any accepted submission) — permanent, set on the list. */
+  solved?: boolean
   /** The signed-in user's submissions for this problem — set on GET /problem/{slug}. */
   submissions?: SubmissionData[]
+}
+
+export type ProblemSort = 'unsolved' | 'rating-asc' | 'rating-desc'
+export type ProblemStatusFilter = 'ALL' | 'SOLVED' | 'UNSOLVED'
+
+/** GET /problem/filter-options — the rating/tag values available to filter by. */
+export interface FilterOptionsData {
+  ratings: number[]
+  tags: string[]
 }
 
 export interface PageData<T> {
@@ -158,6 +175,11 @@ export interface FriendData {
   userId: number
   displayName: string | null
   avatarUrl: string | null
+  // Search-result relationship flags (absent on plain friend-list rows).
+  friend?: boolean
+  pending?: boolean
+  // Friend-list rows only: when the friendship began (epoch millis), for "Friends for…".
+  friendsSinceMs?: number | null
 }
 
 /** GET /friend/request — an incoming friend request. */
@@ -207,15 +229,33 @@ export interface RoomEventData {
 
 // ===== Notifications =====
 
-export type NotificationEventType = 'ROOM_INVITE' | 'FRIEND_REQUEST'
+export type NotificationEventType =
+  | 'ROOM_INVITE'
+  | 'FRIEND_REQUEST'
+  | 'FRIEND_ACCEPTED'
+  | 'FRIEND_DECLINED'
+  | 'DUEL_CHALLENGE'
+  | 'CHALLENGE_ACCEPTED'
+  | 'CHALLENGE_DECLINED'
 
 /** Pushed over /user/queue/notification via STOMP, and returned by GET /notification on load. */
 export interface NotificationData {
   type: NotificationEventType
   roomId?: number | null // ROOM_INVITE — the room to join
   requestId?: number | null // FRIEND_REQUEST — the request to accept/decline
+  challengeId?: string | null // DUEL_CHALLENGE — the challenge to accept/decline
+  matchId?: number | null // CHALLENGE_ACCEPTED — the duel match to jump into
   fromUserId: number
   fromDisplayName: string | null
   fromAvatarUrl: string | null
   createdAtMs?: number | null
+  // Client-only: set true while the "now friends ✓" confirmation lingers before the row is removed.
+  accepted?: boolean
+}
+
+/** POST /challenge · POST /challenge/{id}/accept — the outcome of a duel-challenge action. */
+export interface ChallengeData {
+  challengeId: string | null // set on create — the challenger tracks it while "waiting…"
+  matchId: number | null // set on accept — the duel to jump into
+  opponentDisplayName: string
 }

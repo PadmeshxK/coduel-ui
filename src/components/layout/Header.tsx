@@ -1,4 +1,5 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { Logo } from '../ui/Logo'
 import { Avatar } from '../ui/Avatar'
 import { ThemeToggle } from '../ui/ThemeToggle'
@@ -16,7 +17,34 @@ const NAV = [
 export function Header() {
   const { user, refresh } = useAuth()
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const displayName = user?.displayName ?? user?.email ?? null
+
+  // Click-toggle account menu (not hover) + the mobile nav drawer (collapsed hamburger on narrow screens).
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [navOpen, setNavOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const hamburgerRef = useRef<HTMLDivElement>(null)
+  const drawerRef = useRef<HTMLDivElement>(null)
+
+  // Close either popover on an outside click (the drawer counts the hamburger + the panel as "inside").
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      const t = e.target as Node
+      if (menuRef.current && !menuRef.current.contains(t)) setMenuOpen(false)
+      const inDrawer =
+        hamburgerRef.current?.contains(t) || drawerRef.current?.contains(t)
+      if (!inDrawer) setNavOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [])
+
+  // Navigating always closes both (covers tapping a nav link in the drawer).
+  useEffect(() => {
+    setNavOpen(false)
+    setMenuOpen(false)
+  }, [pathname])
 
   async function handleLogout() {
     try {
@@ -30,13 +58,14 @@ export function Header() {
 
   return (
     <header className="reflective sticky top-4 z-30 rounded-2xl border border-line bg-paper/70 px-3 py-2.5 shadow-[0_16px_40px_-28px_rgba(27,24,19,0.5)] backdrop-blur-xl sm:px-5 sm:py-3">
-      {/* mobile: auto | 1fr | auto (nav scrolls in the middle); sm+: 1fr | auto | 1fr (centered nav) */}
-      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 sm:grid-cols-[1fr_auto_1fr] sm:gap-0">
-        <Link to="/" className="justify-self-start transition hover:opacity-80">
+      {/* flex justify-between → logo flush-left, controls flush-right. The nav is absolutely centered
+          (md+) so it stays dead-center regardless of how wide the two sides get. */}
+      <div className="relative flex items-center justify-between gap-2">
+        <Link to="/" className="transition hover:opacity-80">
           <Logo className="text-[22px] sm:text-[25px]" />
         </Link>
 
-        <nav className="flex min-w-0 items-center gap-4 justify-self-center overflow-x-auto whitespace-nowrap text-[13px] [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-7 sm:text-sm [&::-webkit-scrollbar]:hidden">
+        <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-7 whitespace-nowrap text-sm md:flex">
           {NAV.map((item) => (
             <NavLink
               key={item.label}
@@ -60,29 +89,61 @@ export function Header() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2 justify-self-end sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3">
           {displayName && <NotificationBell />}
           <ThemeToggle />
           {displayName ? (
-            <div className="group relative">
-              <button className="flex items-center gap-2.5 rounded-full border border-transparent py-1 pl-1 pr-1 transition hover:border-line hover:bg-paper-2 group-hover:border-line group-hover:bg-paper-2 lg:pl-3.5">
+            <div ref={menuRef} className="relative">
+              <button
+                onClick={() => {
+                  setMenuOpen((o) => !o)
+                  setNavOpen(false)
+                }}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                className={`flex items-center gap-2.5 rounded-full border py-1 pl-1 pr-1 transition active:scale-[0.97] lg:pl-3.5 ${
+                  menuOpen
+                    ? 'border-line bg-paper-2'
+                    : 'border-transparent hover:border-line hover:bg-paper-2'
+                }`}
+              >
                 <span className="hidden whitespace-nowrap font-mono text-[13px] text-ink-soft lg:inline">
                   {displayName}
                 </span>
                 <Avatar initial={displayName.charAt(0).toUpperCase()} src={user?.avatarUrl} />
               </button>
 
-              {/* hover menu — pt-2 bridges the gap so the cursor can reach it */}
-              <div className="invisible absolute right-0 top-full z-40 pt-2 opacity-0 transition duration-150 group-hover:visible group-hover:opacity-100">
-                <div className="reflective w-[190px] overflow-hidden rounded-xl border border-line bg-paper-2 p-1 shadow-[0_18px_40px_-20px_rgba(27,24,19,0.55)]">
+              {/* Click menu, always mounted + scale/fade toggled so it eases open AND closed. */}
+              <div
+                className={`reflective absolute right-0 top-full z-40 mt-2 w-[220px] origin-top-right overflow-hidden rounded-xl border border-line bg-paper-2 shadow-[0_18px_40px_-20px_rgba(27,24,19,0.55)] transition duration-150 ${
+                  menuOpen ? 'visible scale-100 opacity-100' : 'invisible scale-95 opacity-0'
+                }`}
+              >
+                {/* identity header — only when the navbar has dropped the name (below lg); on lg+ the
+                    name already sits next to the avatar, so showing it again here is redundant. */}
+                <div className="flex items-center gap-2.5 border-b border-line px-3 py-3 lg:hidden">
+                  <Avatar initial={displayName.charAt(0).toUpperCase()} src={user?.avatarUrl} size={34} />
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-semibold text-ink">{displayName}</div>
+                    {user?.email && user.email !== displayName && (
+                      <div className="truncate font-mono text-[11px] text-ink-soft">{user.email}</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-1">
                   <Link
                     to="/profile"
+                    onClick={() => setMenuOpen(false)}
                     className="block rounded-lg px-3 py-2 text-sm text-ink-soft transition hover:bg-black/[0.04] hover:text-ink dark:hover:bg-white/[0.05]"
                   >
                     Edit profile
                   </Link>
                   <button
-                    onClick={handleLogout}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      void handleLogout()
+                    }}
                     className="block w-full rounded-lg px-3 py-2 text-left text-sm text-accent transition hover:bg-accent/10"
                   >
                     Log out
@@ -98,8 +159,78 @@ export function Header() {
               Sign in
             </Link>
           )}
+
+          {/* hamburger — nav links collapse here below md */}
+          <div ref={hamburgerRef} className="md:hidden">
+            <button
+              onClick={() => {
+                setNavOpen((o) => !o)
+                setMenuOpen(false)
+              }}
+              aria-label="Menu"
+              aria-expanded={navOpen}
+              className={`grid h-9 w-9 place-items-center rounded-full border transition active:scale-90 ${
+                navOpen
+                  ? 'border-line bg-paper-2 text-ink'
+                  : 'border-transparent text-ink-soft hover:border-line hover:bg-paper-2 hover:text-ink'
+              }`}
+            >
+              <MenuIcon open={navOpen} />
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* mobile nav drawer — height reveals via the grid 0fr→1fr trick (smooth open AND close);
+          each link then slides in from the left, staggered. */}
+      <div
+        ref={drawerRef}
+        className={`grid overflow-hidden transition-[grid-template-rows] duration-300 ease-fluid md:hidden ${
+          navOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <nav className="flex min-h-0 flex-col gap-1 overflow-hidden">
+          <div className="mt-2.5 border-t border-line pt-2.5" />
+          {NAV.map((item, i) => (
+            <NavLink
+              key={item.label}
+              to={item.to}
+              end={item.to === '/'}
+              onClick={() => setNavOpen(false)}
+              style={{ transitionDelay: navOpen ? `${80 + i * 45}ms` : '0ms' }}
+              className={({ isActive }) =>
+                `rounded-lg px-3 py-2.5 text-[15px] transition-all duration-300 ease-fluid ${
+                  navOpen ? 'translate-x-0 opacity-100' : '-translate-x-3 opacity-0'
+                } ${
+                  isActive
+                    ? 'bg-black/[0.04] font-semibold text-ink dark:bg-white/[0.05]'
+                    : 'text-ink-soft hover:bg-black/[0.03] hover:text-ink dark:hover:bg-white/[0.04]'
+                }`
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      </div>
     </header>
+  )
+}
+
+// Two bars that cross into an X when open — minimal, matches the editorial line language.
+function MenuIcon({ open }: { open: boolean }) {
+  return (
+    <span className="relative block h-[14px] w-[18px]">
+      <span
+        className={`absolute left-0 block h-[2px] w-full rounded-full bg-current transition-all duration-200 ${
+          open ? 'top-[6px] rotate-45' : 'top-0'
+        }`}
+      />
+      <span
+        className={`absolute left-0 block h-[2px] w-full rounded-full bg-current transition-all duration-200 ${
+          open ? 'top-[6px] -rotate-45' : 'top-[12px]'
+        }`}
+      />
+    </span>
   )
 }

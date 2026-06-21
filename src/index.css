@@ -95,6 +95,92 @@ html.lenis body {
   .animate-win-card { animation: none; }
 }
 
+/* Problem statement: Markdown + KaTeX styled to the editorial type system. Tight vertical rhythm,
+   quiet code/blocks, math + tables that scroll instead of overflowing on narrow columns. */
+.problem-md {
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15.5px;
+  line-height: 1.7;
+}
+.problem-md > :first-child { margin-top: 0; }
+.problem-md > :last-child { margin-bottom: 0; }
+.problem-md > * + * { margin-top: 0.9em; }
+.problem-md h1,
+.problem-md h2,
+.problem-md h3,
+.problem-md h4 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  margin-top: 1.6em;
+}
+.problem-md h1 { font-size: 1.35em; }
+.problem-md h2 { font-size: 1.14em; }
+.problem-md h3 { font-size: 1.02em; }
+.problem-md strong { font-weight: 700; }
+.problem-md em { font-style: italic; }
+.problem-md a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.problem-md ul,
+.problem-md ol { padding-left: 1.5em; }
+.problem-md ul { list-style: disc; }
+.problem-md ol { list-style: decimal; }
+.problem-md li + li { margin-top: 0.35em; }
+.problem-md li::marker { color: var(--color-ink-soft); }
+.problem-md hr { border: 0; border-top: 1px solid var(--color-line); margin: 1.6em 0; }
+.problem-md blockquote {
+  border-left: 2px solid var(--color-line);
+  padding-left: 1em;
+  color: var(--color-ink-soft);
+}
+/* inline code */
+.problem-md :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: color-mix(in srgb, var(--color-ink) 7%, transparent);
+  padding: 0.12em 0.4em;
+  border-radius: 5px;
+}
+/* code block */
+.problem-md pre {
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 0.86em;
+  line-height: 1.6;
+}
+.problem-md pre code { font-family: var(--font-mono); }
+/* tables (remark-gfm) — scroll rather than blow out the column */
+.problem-md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+  display: block;
+  overflow-x: auto;
+}
+.problem-md th,
+.problem-md td {
+  border: 1px solid var(--color-line);
+  padding: 6px 10px;
+  text-align: left;
+}
+.problem-md th { background: var(--color-paper-2); font-weight: 600; }
+/* KaTeX: keep display math inside the column on small screens */
+.problem-md .katex-display {
+  margin: 0.7em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+.problem-md .katex { font-size: 1.02em; }
+
 /* Invite auto-dismiss countdown: a thin accent→gold "fuse" pinned to the notification's bottom
    edge that depletes left→right over its lifetime (see InvitePopup.tsx). It's a functional time-
    remaining indicator, so it runs even under reduced-motion; hovering pauses it via play-state. */

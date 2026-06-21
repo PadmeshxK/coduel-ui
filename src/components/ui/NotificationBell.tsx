@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Avatar } from './Avatar'
 import { Button } from './Button'
-import { friendApi, roomApi } from '../../lib/api'
+import { challengeApi, friendApi, roomApi } from '../../lib/api'
 import { useNotifications, notificationKey } from '../../hooks/useNotifications'
 import type { NotificationData } from '../../types'
 
@@ -119,8 +119,10 @@ function NotificationRow({
   onNavigate: () => void
 }) {
   const navigate = useNavigate()
+  const { acceptFriendRequest } = useNotifications()
   const [busy, setBusy] = useState(false)
   const isInvite = notification.type === 'ROOM_INVITE'
+  const isChallenge = notification.type === 'DUEL_CHALLENGE'
   const fromName = notification.fromDisplayName ?? 'Someone'
 
   async function accept() {
@@ -131,10 +133,15 @@ function NotificationRow({
         onResolve()
         onNavigate()
         navigate(`/room/${notification.roomId}`)
-      } else {
-        await friendApi.accept(notification.requestId!)
+      } else if (isChallenge) {
+        const res = await challengeApi.accept(notification.challengeId!)
         onResolve()
-        onFriendChange() // keep the Friends page + bell in sync
+        onNavigate()
+        if (res.matchId) navigate(`/match/${res.matchId}`)
+      } else {
+        // Centralised: flips the shared notification to its "now friends ✓" confirmation (this row
+        // and the toast update together), then clears it. No local state to drift out of sync.
+        await acceptFriendRequest(notification)
       }
     } catch {
       setBusy(false)
@@ -147,6 +154,9 @@ function NotificationRow({
       if (isInvite) {
         // Room invites aren't persisted on decline (they TTL out) — just clear locally.
         onResolve()
+      } else if (isChallenge) {
+        await challengeApi.decline(notification.challengeId!)
+        onResolve()
       } else {
         await friendApi.decline(notification.requestId!)
         onResolve()
@@ -157,6 +167,20 @@ function NotificationRow({
     }
   }
 
+  if (notification.accepted) {
+    return (
+      <div className="animate-reveal flex gap-3 border-b border-line px-4 py-3.5 last:border-b-0">
+        <Avatar initial={fromName.charAt(0).toUpperCase()} src={notification.fromAvatarUrl} size={36} />
+        <div className="min-w-0 flex-1 self-center">
+          <p className="text-[13px] leading-snug">
+            <span className="font-semibold">{fromName}</span>{' '}
+            <span className="text-accent-2">and you are now friends ✓</span>
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="animate-reveal flex gap-3 border-b border-line px-4 py-3.5 last:border-b-0">
       <Avatar initial={fromName.charAt(0).toUpperCase()} src={notification.fromAvatarUrl} size={36} />
@@ -164,7 +188,11 @@ function NotificationRow({
         <p className="text-[13px] leading-snug">
           <span className="font-semibold">{fromName}</span>{' '}
           <span className="text-ink-soft">
-            {isInvite ? 'invited you to a room' : 'sent you a friend request'}
+            {isInvite
+              ? 'invited you to a room'
+              : isChallenge
+                ? 'challenged you to a duel'
+                : 'sent you a friend request'}
           </span>
         </p>
         {notification.createdAtMs != null && (

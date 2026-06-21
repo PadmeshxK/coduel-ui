@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Card } from '../components/ui/Card'
 import { Reveal } from '../components/ui/Reveal'
@@ -9,6 +9,7 @@ import { StatusPill } from '../components/ui/StatusPill'
 import { problemApi } from '../lib/api'
 import { loadPracticeFilter, savePracticeFilter } from '../lib/practiceFilter'
 import { useAsync } from '../hooks/useAsync'
+import { useLenisBox } from '../hooks/useLenisBox'
 import type { FilterOptionsData, ProblemSort, ProblemStatusFilter } from '../types'
 
 const SORTS: { value: ProblemSort; label: string }[] = [
@@ -77,6 +78,13 @@ export function Practice() {
     return q ? all.filter((t) => t.toLowerCase().includes(q)) : all
   }, [options, tagSearch])
 
+  // Smooth-scroll the filter dropdown lists, and (via useLenisBox's prevent override + data-lenis-
+  // prevent on the elements) stop their wheel from scrolling the page behind them.
+  const ratingScrollRef = useRef<HTMLDivElement>(null)
+  const tagScrollRef = useRef<HTMLDivElement>(null)
+  useLenisBox(ratingScrollRef, [options?.ratings.length])
+  useLenisBox(tagScrollRef, [options?.tags.length])
+
   const hasActive = ratings.length > 0 || tags.length > 0 || status !== 'ALL' || debounced !== ''
 
   function clearAll() {
@@ -133,8 +141,8 @@ export function Practice() {
 
         {(options?.ratings.length ?? 0) > 0 && (
           <Popover label="Rating" count={ratings.length} width="w-[280px]">
-            <div className="max-h-64 overflow-y-auto p-3">
-              <div className="flex flex-wrap gap-1.5">
+            <div ref={ratingScrollRef} data-lenis-prevent className="max-h-64 overflow-y-auto">
+              <div className="flex flex-wrap gap-1.5 p-3">
                 {options!.ratings.map((r) => (
                   <Chip key={r} active={ratings.includes(r)} onClick={() => setRatings((p) => toggle(p, r))}>
                     {r}
@@ -156,7 +164,8 @@ export function Practice() {
                 className="w-full rounded-lg border border-line bg-paper px-3 py-1.5 font-mono text-[12px] outline-none transition focus:border-accent"
               />
             </div>
-            <div className="max-h-56 overflow-y-auto p-1.5">
+            <div ref={tagScrollRef} data-lenis-prevent className="max-h-56 overflow-y-auto">
+              <div className="p-1.5">
               {filteredTags.length === 0 ? (
                 <div className="px-2 py-4 text-center font-mono text-[11px] text-ink-soft">no matching tags</div>
               ) : (
@@ -175,6 +184,7 @@ export function Practice() {
                   </button>
                 ))
               )}
+              </div>
             </div>
             {tags.length > 0 && <PanelClear onClick={() => setTags([])} />}
           </Popover>

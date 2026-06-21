@@ -114,21 +114,26 @@ export function ChallengeMode() {
 
       {/* one tight line — circular friends + a magnifier; never wraps (shrink-0 items) */}
       <div className="flex items-center gap-2">
-        {friends.slice(0, PREVIEW).map((f) => {
+        {friends.slice(0, PREVIEW).map((f, i) => {
           const loading = busy === f.userId
           return (
-            <button
+            <span
               key={f.userId}
+              className="animate-reveal z-20 flex shrink-0 items-center"
+              style={{ animationDelay: `${i * 70}ms` }}
+            >
+            <button
               type="button"
               disabled={busy !== null}
               onClick={() => challenge(f)}
               aria-label={`Duel ${f.displayName ?? 'player'}`}
-              className="group relative z-20 shrink-0 rounded-full transition hover:-translate-y-0.5 active:scale-95 disabled:opacity-60"
+              className="group relative rounded-full transition hover:-translate-y-0.5 active:scale-95 disabled:opacity-60"
             >
               <Avatar
                 initial={(f.displayName ?? '?').charAt(0).toUpperCase()}
                 src={f.avatarUrl}
                 size={40}
+                className="block"
               />
               {loading ? (
                 <span className="absolute inset-0 grid place-items-center rounded-full bg-paper-2/70">
@@ -147,20 +152,26 @@ export function ChallengeMode() {
                 </>
               )}
             </button>
+            </span>
           )
         })}
 
+        <span
+          className="animate-reveal z-20 shrink-0"
+          style={{ animationDelay: `${PREVIEW * 70}ms` }}
+        >
         <button
           type="button"
           onClick={() => navigate('/friend')}
           aria-label="Duel more friends"
-          className="group relative z-20 grid h-10 w-10 shrink-0 place-items-center rounded-full border border-dashed border-line text-ink-soft transition hover:-translate-y-0.5 hover:border-accent hover:text-accent"
+          className="group relative grid h-10 w-10 place-items-center rounded-full border border-dashed border-line text-ink-soft transition hover:-translate-y-0.5 hover:border-accent hover:text-accent"
         >
           <SearchIcon size={16} />
           <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 translate-y-1 whitespace-nowrap rounded-md border border-line bg-paper-2 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-ink opacity-0 shadow-[0_10px_24px_-10px_rgba(27,24,19,0.5)] transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
             Duel friends
           </span>
         </button>
+        </span>
       </div>
     </div>
   )

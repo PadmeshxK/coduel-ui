@@ -18,10 +18,16 @@ interface StompApi {
    * connected (it's applied on connect) and survives reconnects (re-applied automatically).
    */
   subscribe: (destination: string, handler: Handler) => () => void
+  /** Fire-and-forget SEND to an /app destination (e.g. typing signals). No-op while disconnected. */
+  publish: (destination: string, body: string) => void
   connected: boolean
 }
 
-const StompContext = createContext<StompApi>({ subscribe: () => () => {}, connected: false })
+const StompContext = createContext<StompApi>({
+  subscribe: () => () => {},
+  publish: () => {},
+  connected: false,
+})
 
 /**
  * The app's single STOMP connection. One WebSocket per session carries every live destination —
@@ -56,6 +62,12 @@ export function StompProvider({ children }: { children: ReactNode }) {
         }
       }
       regs.current.delete(id)
+    }
+  }, [])
+
+  const publish = useCallback((destination: string, body: string) => {
+    if (connectedRef.current && clientRef.current) {
+      clientRef.current.publish({ destination, body })
     }
   }, [])
 
@@ -94,7 +106,7 @@ export function StompProvider({ children }: { children: ReactNode }) {
     }
   }, [user, loading])
 
-  const value = useMemo(() => ({ subscribe, connected }), [subscribe, connected])
+  const value = useMemo(() => ({ subscribe, publish, connected }), [subscribe, publish, connected])
   return <StompContext.Provider value={value}>{children}</StompContext.Provider>
 }
 

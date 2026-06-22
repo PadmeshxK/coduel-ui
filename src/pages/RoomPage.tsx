@@ -9,7 +9,7 @@ import { SectionLabel } from '../components/ui/SectionLabel'
 import { roomApi, friendApi, matchApi } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { useStomp } from '../hooks/useStomp'
-import type { FriendData, RoomData, RoomEventData } from '../types'
+import type { FriendData, RoomChatData, RoomData, RoomEventData } from '../types'
 
 // Cool host marker — a small gold crown that sits above the host's avatar.
 function HostCrown() {
@@ -38,7 +38,7 @@ export function RoomPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
-  const { subscribe } = useStomp()
+  const { subscribe, publish } = useStomp()
 
   const [room, setRoom] = useState<RoomData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -51,8 +51,14 @@ export function RoomPage() {
   const [inviteSent, setInviteSent] = useState<Set<number>>(new Set())
   const [inviting, setInviting] = useState<number | null>(null)
 
+  const [chat, setChat] = useState<RoomChatData[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const chatScrollRef = useRef<HTMLDivElement>(null)
+
   const seatRowRef = useRef<HTMLDivElement>(null)
-  const prevRects = useRef<Map<string, DOMRect>>(new Map())
+  // Seat positions are stored RELATIVE TO THE SEAT ROW (not the viewport), so page scroll or layout
+  // shifts elsewhere on the page don't contaminate the FLIP delta.
+  const prevRects = useRef<Map<string, { left: number; top: number }>>(new Map())
   // True once WE choose to leave — suppresses room events (e.g. our own leave closing the room) so
   // we don't flash the "closed" screen on the way out.
   const leavingRef = useRef(false)
@@ -126,6 +132,40 @@ export function RoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId])
 
+  // ---- lobby chat (members only): hydrate recent history + live updates on the chat sub-topic ----
+  useEffect(() => {
+    let activeChat = true
+    roomApi.chat(roomId).then((c) => activeChat && setChat(c)).catch(() => {})
+    const unsub = subscribe(`/topic/room/${roomId}/chat`, (body) => {
+      try {
+        const m = JSON.parse(body) as RoomChatData
+        setChat((prev) => [...prev, m])
+      } catch {
+        // ignore malformed frames
+      }
+    })
+    return () => {
+      activeChat = false
+      unsub()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId])
+
+  // Keep the latest chat line in view — scroll the chat box itself (NOT scrollIntoView, which would
+  // also scroll the whole page and throw off the seat-row FLIP measurements).
+  useEffect(() => {
+    const el = chatScrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [chat])
+
+  function sendChat() {
+    const text = chatInput.trim()
+    if (!text) return
+    // The broadcast echoes back to us via the topic, so no optimistic append — it arrives live.
+    publish(`/app/room/${roomId}/chat`, text)
+    setChatInput('')
+  }
+
   // While waiting out a match I forfeited, poll for it to finish so the lobby reopens for a rematch.
   useEffect(() => {
     if (!waitingForMatch) return
@@ -155,16 +195,19 @@ export function RoomPage() {
   useLayoutEffect(() => {
     const row = seatRowRef.current
     if (!row) return
+    const rowRect = row.getBoundingClientRect()
     const seats = Array.from(row.querySelectorAll<HTMLElement>('[data-seat]'))
-    const next = new Map<string, DOMRect>()
+    const next = new Map<string, { left: number; top: number }>()
     for (const seat of seats) {
       const id = seat.dataset.seat!
-      const rect = seat.getBoundingClientRect()
-      next.set(id, rect)
+      const r = seat.getBoundingClientRect()
+      // Relative to the row, so a scrolled/reflowed page can't fake a vertical delta.
+      const pos = { left: r.left - rowRect.left, top: r.top - rowRect.top }
+      next.set(id, pos)
       const prev = prevRects.current.get(id)
       if (prev) {
-        const dx = prev.left - rect.left
-        const dy = prev.top - rect.top
+        const dx = prev.left - pos.left
+        const dy = prev.top - pos.top
         if (dx || dy) {
           seat.animate(
             [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
@@ -373,8 +416,11 @@ export function RoomPage() {
             : 'You’re in. Sit tight — the host drops everyone into the problem at the same moment.'}
         </p>
 
-        {/* seats — the room filling up */}
-        <Card className="mt-8">
+        {/* lobby grid — players + invite on the left, chat alongside on the right (all in view) */}
+        <div className="mt-8 grid gap-[22px] lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-[22px]">
+            {/* seats — the room filling up */}
+            <Card>
           <div className="flex items-center justify-between">
             <SectionLabel>Players</SectionLabel>
             <span className="font-mono text-[11px] text-ink-soft">
@@ -450,10 +496,10 @@ export function RoomPage() {
           </div>
         </Card>
 
-        {/* invite friends — any member can pull people in, not just the host */}
-        {openSeats > 0 && (
-          <Card className="mt-[22px]">
-            <SectionLabel>Invite friends</SectionLabel>
+            {/* invite friends — any member can pull people in, not just the host */}
+            {openSeats > 0 && (
+              <Card>
+                <SectionLabel>Invite friends</SectionLabel>
             {uninvitedFriends.length === 0 ? (
               <p className="mt-3 text-[13px] text-ink-soft">
                 {friends.length === 0
@@ -496,8 +542,119 @@ export function RoomPage() {
                 })}
               </div>
             )}
+              </Card>
+            )}
+          </div>
+
+          {/* right column — lobby chat lives alongside, full-height (no scrolling to find it).
+              Ephemeral, members only; there's deliberately no chat during the actual match. */}
+          <Card className="flex min-h-0 flex-col">
+            <SectionLabel>Lobby chat</SectionLabel>
+            {/* premium fade hairline — no harsh edge-to-edge rule */}
+            <div className="mt-3 h-px bg-gradient-to-r from-transparent via-line to-transparent" />
+
+            <div
+              ref={chatScrollRef}
+              data-lenis-prevent
+              className="no-scrollbar mt-3 h-[280px] space-y-2.5 overflow-y-auto pr-1 lg:h-auto lg:min-h-0 lg:flex-1"
+            >
+              {chat.length === 0 ? (
+                <div className="grid h-full place-items-center px-6 text-center">
+                  <div>
+                    <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-2xl border border-line bg-paper text-ink-soft">
+                      <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" />
+                      </svg>
+                    </div>
+                    <p className="text-[13px] text-ink-soft">No messages yet — say hello to the lobby.</p>
+                  </div>
+                </div>
+              ) : (
+                chat.map((m, i) => {
+                  const mine = m.senderId === user?.id
+                  const time = m.createdAtMs
+                    ? new Date(m.createdAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : ''
+                  return (
+                    <div
+                      key={`${m.createdAtMs}-${m.senderId}-${i}`}
+                      className={`flex items-end gap-2 ${mine ? 'justify-end' : 'justify-start'}`}
+                    >
+                      {!mine && (
+                        <Avatar
+                          initial={(m.senderName ?? '?').charAt(0).toUpperCase()}
+                          src={m.senderAvatarUrl}
+                          size={26}
+                        />
+                      )}
+                      <div
+                        title={time}
+                        className={`max-w-[78%] whitespace-pre-wrap break-words px-3.5 py-2 text-[13px] leading-snug shadow-sm ${
+                          mine
+                            ? 'rounded-2xl rounded-br-md bg-accent text-white'
+                            : 'rounded-2xl rounded-bl-md border border-line bg-paper-2 text-ink'
+                        }`}
+                      >
+                        {!mine && (
+                          <div className="mb-0.5 text-[11px] font-semibold text-accent-2">
+                            {m.senderName ?? 'player'}
+                          </div>
+                        )}
+                        {m.body}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    sendChat()
+                  }
+                }}
+                placeholder="Message the lobby…"
+                className="flex-1 rounded-2xl border border-line bg-paper px-3.5 py-2.5 text-[13.5px] outline-none transition focus:border-accent"
+              />
+              <button
+                onClick={sendChat}
+                disabled={!chatInput.trim()}
+                aria-label="Send"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition active:scale-90 disabled:opacity-40"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M12 20V5" />
+                  <path d="m5 12 7-7 7 7" />
+                </svg>
+              </button>
+            </div>
           </Card>
-        )}
+        </div>
       </div>
     </Reveal>
   )

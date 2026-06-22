@@ -123,7 +123,35 @@ function NotificationRow({
   const [busy, setBusy] = useState(false)
   const isInvite = notification.type === 'ROOM_INVITE'
   const isChallenge = notification.type === 'DUEL_CHALLENGE'
+  const isDm = notification.type === 'DM_RECEIVED'
   const fromName = notification.fromDisplayName ?? 'Someone'
+
+  // A DM is a passive heads-up (it TTLs out on its own) — the whole row just opens the thread.
+  if (isDm) {
+    return (
+      <button
+        onClick={() => {
+          onResolve()
+          onNavigate()
+          navigate(`/messages/${notification.fromUserId}`)
+        }}
+        className="animate-reveal flex w-full items-center gap-3 border-b border-line px-4 py-3.5 text-left transition last:border-b-0 hover:bg-accent/[0.04]"
+      >
+        <Avatar initial={fromName.charAt(0).toUpperCase()} src={notification.fromAvatarUrl} size={36} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] leading-snug">
+            <span className="font-semibold">{fromName}</span>{' '}
+            <span className="text-ink-soft">sent you a message</span>
+          </p>
+          {notification.createdAtMs != null && (
+            <span className="mt-0.5 block font-mono text-[10px] text-ink-soft">
+              {timeAgo(notification.createdAtMs)}
+            </span>
+          )}
+        </div>
+      </button>
+    )
+  }
 
   async function accept() {
     setBusy(true)

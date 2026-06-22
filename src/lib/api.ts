@@ -1,7 +1,9 @@
 import { http } from './http'
 import type {
   ChallengeData,
+  ConversationData,
   ExecutionForm,
+  MessageData,
   FilterOptionsData,
   FriendData,
   FriendRequestData,
@@ -13,6 +15,7 @@ import type {
   ProblemData,
   ProblemSort,
   ProblemStatusFilter,
+  RoomChatData,
   RoomData,
   RunAcceptedData,
   SubmissionData,
@@ -118,6 +121,26 @@ export const challengeApi = {
   decline: (id: string) => http.post(`/challenge/${id}/decline`),
 }
 
+export const chatApi = {
+  // The DM inbox — my conversations, most-recent-first.
+  conversations: () => http.get<ConversationData[]>('/chat/conversations').then((r) => r.data),
+  // A thread page, newest-first; pass `before` (a messageId) to load older history (keyset).
+  messages: (conversationId: number, before?: number, size = 30) =>
+    http
+      .get<MessageData[]>(`/chat/conversations/${conversationId}/messages`, { params: { before, size } })
+      .then((r) => r.data),
+  // Send a DM to a friend → the persisted message (also pushed live to the recipient).
+  send: (recipientUserId: number, body: string) =>
+    http.post<MessageData>('/chat/messages', { recipientUserId, body }).then((r) => r.data),
+  // Mark a thread read up to now — clears its unread badge (persisted server-side).
+  markRead: (conversationId: number) => http.post(`/chat/conversations/${conversationId}/read`),
+}
+
+export const presenceApi = {
+  // userIds of my friends who are online right now — live changes then arrive on /user/queue/presence.
+  onlineFriends: () => http.get<number[]>('/presence/friends').then((r) => r.data),
+}
+
 export const matchApi = {
   get: (id: string | number) => http.get<MatchData>(`/match/${id}`).then((r) => r.data),
   // Give up an active match — the opponent wins (backend publishes MATCH_OVER).
@@ -136,6 +159,8 @@ export const roomApi = {
   // Host starts a match; the returned room carries the new activeMatchId to jump into.
   start: (roomId: number) => http.post<RoomData>(`/room/${roomId}/start`).then((r) => r.data),
   leave: (roomId: number) => http.delete(`/room/${roomId}/leave`),
+  // Hydrate the lobby chat (recent messages, oldest-first). Live updates arrive on /topic/room/{id}/chat.
+  chat: (roomId: number) => http.get<RoomChatData[]>(`/room/${roomId}/chat`).then((r) => r.data),
 }
 
 export const notificationApi = {

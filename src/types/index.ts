@@ -136,6 +136,41 @@ export interface RunAcceptedData {
   runId: string
 }
 
+// ===== Direct messages =====
+
+/** GET /chat/conversations — a DM inbox row: the other party + a preview of the latest message. */
+export interface ConversationData {
+  conversationId: number
+  otherUserId: number
+  otherDisplayName: string | null
+  otherAvatarUrl: string | null
+  lastPreview: string | null
+  lastMessageAtMs: number | null
+  lastSenderId: number | null
+  // True when there's a newer message from the other person than your read marker (server-tracked).
+  unread: boolean
+}
+
+/** A friend's online/offline transition, pushed live over /user/queue/presence. */
+export interface PresenceData {
+  userId: number
+  online: boolean
+}
+
+/** Ephemeral "X is typing" signal, pushed over /user/queue/typing. */
+export interface TypingData {
+  fromUserId: number
+}
+
+/** A single DM — from a thread page or pushed live over /user/queue/dm. */
+export interface MessageData {
+  messageId: number
+  conversationId: number
+  senderId: number
+  body: string
+  createdAtMs: number | null
+}
+
 /** POST /submission (userId comes from the session, never the body). */
 export interface SubmissionForm {
   problemId: number
@@ -226,6 +261,15 @@ export interface RoomData {
   activeMatchId: number | null
 }
 
+/** An ephemeral lobby-chat message (Redis ring buffer) — pushed live on /topic/room/{roomId}/chat. */
+export interface RoomChatData {
+  senderId: number
+  senderName: string | null
+  senderAvatarUrl: string | null
+  body: string
+  createdAtMs: number | null
+}
+
 /** Payload on /topic/room/{roomId} — the persistent lobby channel. */
 export type RoomEventType = 'ROSTER_CHANGED' | 'MATCH_STARTED' | 'ROOM_CLOSED'
 
@@ -245,6 +289,7 @@ export type NotificationEventType =
   | 'CHALLENGE_ACCEPTED'
   | 'CHALLENGE_DECLINED'
   | 'MATCHMAKING_FOUND'
+  | 'DM_RECEIVED'
 
 /** Pushed over /user/queue/notification via STOMP, and returned by GET /notification on load. */
 export interface NotificationData {

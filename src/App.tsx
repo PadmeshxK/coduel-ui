@@ -9,6 +9,7 @@ import { Login } from './pages/Login'
 import { NameSetup } from './pages/NameSetup'
 import { Profile } from './pages/Profile'
 import { Friends } from './pages/Friends'
+import { Messages } from './pages/Messages'
 import { Styleguide } from './pages/Styleguide'
 import { ErrorPage } from './pages/ErrorPage'
 import { RequireAuth } from './components/RequireAuth'
@@ -57,6 +58,16 @@ function App() {
             element={
               <RequireAuth>
                 <Friends />
+              </RequireAuth>
+            }
+          />
+          {/* One route with an optional param so switching threads updates the param in place
+              (no remount / full-page reload) — only the right panel re-renders. */}
+          <Route
+            path="/messages/:userId?"
+            element={
+              <RequireAuth>
+                <Messages />
               </RequireAuth>
             }
           />

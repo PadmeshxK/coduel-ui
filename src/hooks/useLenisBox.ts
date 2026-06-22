@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react'
+import { useEffect, type RefObject, type MutableRefObject } from 'react'
 import Lenis from 'lenis'
 
 /**
@@ -9,8 +9,15 @@ import Lenis from 'lenis'
  * Pass a ref to the `overflow-y-auto` wrapper; its single child is treated as the scroll content,
  * so structure the markup as `<div ref><div>…content…</div></div>`. Re-runs when `deps` change
  * (e.g. the problem swaps) so Lenis re-measures.
+ *
+ * Pass `instanceRef` to get a handle on the live Lenis instance (e.g. to `scrollTo` programmatically,
+ * like a chat jumping to its latest message). It's null under reduced-motion / before mount.
  */
-export function useLenisBox(ref: RefObject<HTMLElement | null>, deps: unknown[] = []) {
+export function useLenisBox(
+  ref: RefObject<HTMLElement | null>,
+  deps: unknown[] = [],
+  instanceRef?: MutableRefObject<Lenis | null>,
+) {
   useEffect(() => {
     const wrapper = ref.current
     const content = wrapper?.firstElementChild as HTMLElement | null
@@ -28,6 +35,7 @@ export function useLenisBox(ref: RefObject<HTMLElement | null>, deps: unknown[] 
       // prevent so the container owns its own wheel and actually scrolls smoothly.
       prevent: () => false,
     })
+    if (instanceRef) instanceRef.current = lenis
 
     let frame = 0
     const raf = (time: number) => {
@@ -39,6 +47,7 @@ export function useLenisBox(ref: RefObject<HTMLElement | null>, deps: unknown[] 
     return () => {
       cancelAnimationFrame(frame)
       lenis.destroy()
+      if (instanceRef) instanceRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)

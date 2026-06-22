@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Avatar } from '../components/ui/Avatar'
@@ -8,6 +9,7 @@ import { Pager } from '../components/ui/Pager'
 import { challengeApi, friendApi, userApi } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { useNotifications } from '../hooks/useNotifications'
+import { usePresence } from '../hooks/usePresence'
 import type { FriendData, FriendRequestData } from '../types'
 
 const FRIENDS_PER_PAGE = 8
@@ -15,6 +17,7 @@ const FRIENDS_PER_PAGE = 8
 export function Friends() {
   const { user } = useAuth()
   const { notifyFriendsChanged, friendsVersion, declinedRequest, declinedChallenge } = useNotifications()
+  const navigate = useNavigate()
 
   const [friends, setFriends] = useState<FriendData[]>([])
   const [requests, setRequests] = useState<FriendRequestData[]>([])
@@ -238,6 +241,9 @@ export function Friends() {
                       <Button size="sm" disabled={duelingId !== null} onClick={() => startDuel(f)}>
                         {duelingId === f.userId ? 'Waiting…' : 'Duel'}
                       </Button>
+                      <Button size="sm" variant="secondary" onClick={() => navigate(`/messages/${f.userId}`)}>
+                        Message
+                      </Button>
                       <Button size="sm" variant="secondary" disabled={busy === f.userId} onClick={() => act(f.userId, async () => { await friendApi.unfriend(f.userId); notifyFriendsChanged() })}>
                         Remove
                       </Button>
@@ -273,12 +279,23 @@ function Row({
   meta?: ReactNode
   children: ReactNode
 }) {
+  const { isOnline } = usePresence()
+  const online = isOnline(person.userId)
   return (
     <div className={`flex items-center gap-4 px-[22px] py-4 ${first ? '' : 'border-t border-line'}`}>
-      <Avatar initial={(person.displayName ?? '?').charAt(0).toUpperCase()} src={person.avatarUrl} size={40} />
+      <span className="relative inline-block shrink-0" style={{ width: 40, height: 40 }}>
+        <Avatar initial={(person.displayName ?? '?').charAt(0).toUpperCase()} src={person.avatarUrl} size={40} />
+        {online && (
+          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-paper bg-accent-2" />
+        )}
+      </span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[16px] font-semibold">{person.displayName ?? 'Unknown'}</div>
-        {meta && <div className="mt-0.5 font-mono text-[11px] text-ink-soft">{meta}</div>}
+        {meta ? (
+          <div className="mt-0.5 font-mono text-[11px] text-ink-soft">{meta}</div>
+        ) : online ? (
+          <div className="mt-0.5 font-mono text-[11px] text-accent-2">● Online</div>
+        ) : null}
       </div>
       {children}
     </div>

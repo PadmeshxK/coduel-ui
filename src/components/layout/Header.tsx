@@ -12,6 +12,7 @@ const NAV = [
   { label: 'Practice', to: '/practice' },
   { label: 'Leaderboard', to: '/leaderboard' },
   { label: 'Friends', to: '/friend' },
+  { label: 'Messages', to: '/messages' },
 ]
 
 export function Header() {
@@ -58,14 +59,15 @@ export function Header() {
 
   return (
     <header className="reflective sticky top-4 z-30 rounded-2xl border border-line bg-paper/70 px-3 py-2.5 shadow-[0_16px_40px_-28px_rgba(27,24,19,0.5)] backdrop-blur-xl sm:px-5 sm:py-3">
-      {/* flex justify-between → logo flush-left, controls flush-right. The nav is absolutely centered
-          (md+) so it stays dead-center regardless of how wide the two sides get. */}
-      <div className="relative flex items-center justify-between gap-2">
-        <Link to="/" className="transition hover:opacity-80">
+      {/* 3-column grid: logo | nav | controls. Equal 1fr side columns keep the centre column (nav)
+          dead-centre of the container, and — unlike absolute centering — the sides can't overlap it
+          as more links are added. */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+        <Link to="/" className="justify-self-start transition hover:opacity-80">
           <Logo className="text-[22px] sm:text-[25px]" />
         </Link>
 
-        <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-7 whitespace-nowrap text-sm md:flex">
+        <nav className="hidden items-center justify-center gap-7 whitespace-nowrap text-sm md:flex">
           {NAV.map((item) => (
             <NavLink
               key={item.label}
@@ -89,7 +91,7 @@ export function Header() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-1.5 sm:gap-3">
+        <div className="flex items-center justify-self-end gap-1.5 sm:gap-3">
           {displayName && <NotificationBell />}
           <ThemeToggle />
           {displayName ? (

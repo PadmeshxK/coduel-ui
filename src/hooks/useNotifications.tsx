@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from 'react'
 import type { ReactNode } from 'react'
@@ -19,6 +20,9 @@ export function notificationKey(n: NotificationData): string {
       return `room:${n.roomId}`
     case 'DUEL_CHALLENGE':
       return `challenge:${n.challengeId}`
+    case 'DM_RECEIVED':
+      // Keyed by sender so repeated DMs collapse into one bell row (its TTL just refreshes).
+      return `dm:${n.fromUserId}`
     default:
       return `friend:${n.requestId}`
   }
@@ -30,10 +34,17 @@ export interface FlashToast {
   id: string
   name: string
   avatarUrl?: string | null
+  // 'friend' = "you're now friends" confirmation; 'dm' = "X messaged you" (clickable → its thread).
+  kind: 'friend' | 'dm'
+  to?: string
 }
 
 const MAX_NOTIFICATIONS = 20
 const FRIEND_CONFIRM_MS = 2000
+// Cap stacked flash toasts (DM / "now friends") so spamming can't bury the screen — keep the latest few.
+const MAX_FLASH = 3
+// How long a DM lingers in the bell after its toast — a grace window so a missed toast isn't lost.
+const DM_BELL_TTL_MS = 12_000
 
 const sortCap = (list: NotificationData[]): NotificationData[] =>
   [...list]
@@ -66,6 +77,9 @@ interface NotificationsState {
   // Set (rising tick) when ranked matchmaking pairs us — RankedDuelMode shows an "opponent found"
   // beat, then navigates both players into the duel after a short cooldown.
   matchmakingFound: { matchId: number; tick: number } | null
+  // The Messages page registers the conversation it's showing so a DM toast isn't popped for the
+  // thread you're already looking at (null = no DM thread focused).
+  setActiveDm: (userId: number | null) => void
 }
 
 const NotificationsContext = createContext<NotificationsState>({
@@ -80,6 +94,7 @@ const NotificationsContext = createContext<NotificationsState>({
   declinedRequest: null,
   declinedChallenge: null,
   matchmakingFound: null,
+  setActiveDm: () => {},
 })
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
@@ -92,6 +107,13 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const [declinedRequest, setDeclinedRequest] = useState<{ userId: number; tick: number } | null>(null)
   const [declinedChallenge, setDeclinedChallenge] = useState<{ userId: number; name: string; tick: number } | null>(null)
   const [matchmakingFound, setMatchmakingFound] = useState<{ matchId: number; tick: number } | null>(null)
+  // Which DM thread is open (ref, not state — it only gates toast suppression, never triggers a render).
+  const activeDmRef = useRef<number | null>(null)
+  const setActiveDm = useCallback((userId: number | null) => {
+    activeDmRef.current = userId
+  }, [])
+  // Per-sender TTL timers that evict a DM from the bell once its grace window lapses.
+  const dmTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const { subscribe } = useStomp()
 
   // Authoritative reload — GET /notification is the full pending set (invites in Redis, requests in
@@ -149,8 +171,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           id: `friend-${incoming.fromUserId}-${Date.now()}`,
           name: incoming.fromDisplayName ?? 'Someone',
           avatarUrl: incoming.fromAvatarUrl,
+          kind: 'friend' as const,
         },
-      ])
+      ].slice(-MAX_FLASH))
       setFriendsVersion((v) => v + 1)
       return
     }
@@ -172,6 +195,39 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     if (incoming.type === 'MATCHMAKING_FOUND' && incoming.matchId) {
       const matchId = incoming.matchId
       setMatchmakingFound((prev) => ({ matchId, tick: (prev?.tick ?? 0) + 1 }))
+      return
+    }
+    // A DM arrived — suppress entirely while we're reading that exact thread (the /user/queue/dm stream
+    // is already updating the open view). Otherwise pop a transient toast AND drop a bell row that
+    // lingers for a grace window (DM_BELL_TTL_MS) so a missed toast isn't lost, then evicts itself.
+    if (incoming.type === 'DM_RECEIVED') {
+      if (activeDmRef.current === incoming.fromUserId) return
+      const dm = { ...incoming, createdAtMs: incoming.createdAtMs ?? Date.now() }
+      setFlashToasts((prev) => [
+        ...prev,
+        {
+          id: `dm-${incoming.fromUserId}-${Date.now()}`,
+          name: incoming.fromDisplayName ?? 'Someone',
+          avatarUrl: incoming.fromAvatarUrl,
+          kind: 'dm' as const,
+          to: `/messages/${incoming.fromUserId}`,
+        },
+      ].slice(-MAX_FLASH))
+      const key = notificationKey(dm)
+      setNotifications((prev) => {
+        const byKey = new Map<string, NotificationData>()
+        for (const n of [...prev, dm]) byKey.set(notificationKey(n), n)
+        return sortCap([...byKey.values()])
+      })
+      const existing = dmTimers.current.get(key)
+      if (existing) clearTimeout(existing)
+      dmTimers.current.set(
+        key,
+        setTimeout(() => {
+          setNotifications((prev) => prev.filter((n) => notificationKey(n) !== key))
+          dmTimers.current.delete(key)
+        }, DM_BELL_TTL_MS),
+      )
       return
     }
     // A challenge we sent was declined — signal the challenger's Play card to drop "waiting…". No bell.
@@ -227,6 +283,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         declinedRequest,
         declinedChallenge,
         matchmakingFound,
+        setActiveDm,
       }}
     >
       {children}

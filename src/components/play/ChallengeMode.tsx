@@ -5,9 +5,10 @@ import { Loader } from '../ui/Loader'
 import { SearchIcon, SwordsIcon } from './icons'
 import { challengeApi, friendApi } from '../../lib/api'
 import { useNotifications } from '../../hooks/useNotifications'
+import { usePresence } from '../../hooks/usePresence'
 import type { FriendData } from '../../types'
 
-const PREVIEW = 3 // a few friends to duel in one tap; the rest live on the Friends page
+const MAX_ONLINE = 5 // only friends online right now are duel-able in one tap; the rest live on Friends
 
 type Pending = { userId: number; name: string }
 
@@ -20,6 +21,7 @@ type Pending = { userId: number; name: string }
 export function ChallengeMode() {
   const navigate = useNavigate()
   const { declinedChallenge } = useNotifications()
+  const { isOnline } = usePresence()
   const [friends, setFriends] = useState<FriendData[] | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
@@ -106,15 +108,22 @@ export function ChallengeMode() {
     )
   }
 
+  // Only friends online right now (capped) — duelling someone offline would just time out.
+  const online = friends.filter((f) => isOnline(f.userId))
+  const shown = online.slice(0, MAX_ONLINE)
+
   return (
     <div className="flex flex-col gap-2">
       {declined && (
         <p className="font-mono text-[11px] text-accent">✗ {declined} declined — try another.</p>
       )}
 
-      {/* one tight line — circular friends + a magnifier; never wraps (shrink-0 items) */}
+      {/* one tight line — friends online now + a magnifier; never wraps (shrink-0 items) */}
       <div className="flex items-center gap-2">
-        {friends.slice(0, PREVIEW).map((f, i) => {
+        {shown.length === 0 && (
+          <p className="text-[13px] text-ink-soft">No friends online right now.</p>
+        )}
+        {shown.map((f, i) => {
           const loading = busy === f.userId
           return (
             <span
@@ -158,7 +167,7 @@ export function ChallengeMode() {
 
         <span
           className="animate-reveal z-20 shrink-0"
-          style={{ animationDelay: `${PREVIEW * 70}ms` }}
+          style={{ animationDelay: `${shown.length * 70}ms` }}
         >
         <button
           type="button"

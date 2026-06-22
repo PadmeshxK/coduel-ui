@@ -31,9 +31,11 @@ export function InvitePopupLayer() {
 
   // Only events that arrived LIVE this session pop a toast — notifications hydrated from the server
   // on load (or after a refresh) stay in the bell only, so they never re-pop.
+  // Total toasts on screen is capped at 3. Flash toasts (≤3 at the source, always rendered so they
+  // auto-dismiss) take priority; invite/notification toasts fill whatever slots remain.
   const toasts = notifications
     .filter((n) => liveKeys.has(notificationKey(n)) && !hidden.has(toastKey(n)))
-    .slice(0, 3)
+    .slice(0, Math.max(0, 3 - flashToasts.length))
 
   if (toasts.length === 0 && flashToasts.length === 0) return null
 
@@ -41,7 +43,7 @@ export function InvitePopupLayer() {
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
       {/* "you're now friends" confirmations (shown to the requester on accept) */}
       {flashToasts.map((t) => (
-        <FriendFlashCard key={t.id} toast={t} />
+        <FlashCard key={t.id} toast={t} />
       ))}
       {toasts.map((n) => (
         <InviteCard
@@ -55,8 +57,37 @@ export function InvitePopupLayer() {
 }
 
 // A transient success card: "You and <name> are now friends ✓". Self-dismisses via the Toast timer.
-function FriendFlashCard({ toast }: { toast: FlashToast }) {
+function FlashCard({ toast }: { toast: FlashToast }) {
   const { dismissFlash } = useNotifications()
+  const navigate = useNavigate()
+
+  // DM: a clickable cue → opens the thread. Shown only when you're NOT already in that conversation
+  // (the provider suppresses it otherwise).
+  if (toast.kind === 'dm') {
+    return (
+      <Toast onClose={() => dismissFlash(toast.id)} duration={FLASH_MS} className="border-accent/40">
+        <button
+          type="button"
+          onClick={() => {
+            if (toast.to) navigate(toast.to)
+            dismissFlash(toast.id)
+          }}
+          className="flex w-full items-center gap-3 text-left"
+        >
+          <Avatar initial={toast.name.charAt(0).toUpperCase()} src={toast.avatarUrl} size={40} />
+          <div className="min-w-0 flex-1">
+            <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-accent">● Message</p>
+            <p className="mt-1 text-[14px] font-semibold leading-snug">
+              <span className="text-ink">{toast.name}</span>{' '}
+              <span className="text-ink-soft">sent you a message</span>
+            </p>
+          </div>
+        </button>
+      </Toast>
+    )
+  }
+
+  // Friend: the "you're now friends" confirmation (not actionable).
   return (
     <Toast onClose={() => dismissFlash(toast.id)} duration={FLASH_MS} className="border-accent-2/40">
       <div className="flex items-center gap-3">

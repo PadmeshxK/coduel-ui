@@ -337,6 +337,15 @@ html.lenis body {
   *::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  /* Opt-out: panels that scroll via Lenis (the chat thread/list) and the composer textarea hide the
+     native bar entirely for a clean edge — the momentum scroll + jump button are the affordance. */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Animated angle for the reflective border sweep (registered so it can interpolate). */

@@ -87,6 +87,9 @@ export function Messages() {
   const [query, setQuery] = useState("");
   const [showJump, setShowJump] = useState(false);
   const [typing, setTyping] = useState(false);
+  // False until the first conversations fetch returns — drives the list/thread loaders so the empty
+  // state ("start a conversation" / "no messages") never flashes before we know what's there.
+  const [convLoaded, setConvLoaded] = useState(false);
 
   // The thread is keyed by the friend (userId); the conversation row (if any) gives its id + history.
   const activeConversationId = useMemo(
@@ -158,7 +161,7 @@ export function Messages() {
 
   // DMs are friends-only, so the thread header / contact name always resolves from the friends list.
   useEffect(() => {
-    void reloadConversations();
+    void reloadConversations().finally(() => setConvLoaded(true));
     void friendApi
       .list()
       .then(setFriends)
@@ -259,16 +262,29 @@ export function Messages() {
   async function handleSend() {
     const text = input.trim();
     if (!text || activeUserId == null || sending) return;
+    // Snappy + optimistic: clear the box and show the message immediately, then reconcile with the
+    // server's saved copy (for the sender, a DM comes back on the HTTP response, not the socket).
+    setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    const tempId = -Date.now();
+    const optimistic: MessageData = {
+      messageId: tempId,
+      conversationId: activeConversationId ?? 0,
+      senderId: me ?? 0,
+      body: text,
+      createdAtMs: Date.now(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    nearBottomRef.current = true;
     setSending(true);
     try {
       const msg = await chatApi.send(activeUserId, text);
-      setMessages((prev) => [...prev, msg]);
-      setInput("");
-      if (textareaRef.current) textareaRef.current.style.height = "auto";
-      nearBottomRef.current = true;
+      setMessages((prev) => prev.map((m) => (m.messageId === tempId ? msg : m)));
       void reloadConversations();
     } catch {
-      // leave the text in the box so it isn't lost
+      // send failed — drop the optimistic bubble and put the text back so it isn't lost
+      setMessages((prev) => prev.filter((m) => m.messageId !== tempId));
+      setInput(text);
     } finally {
       setSending(false);
     }
@@ -389,7 +405,11 @@ export function Messages() {
               className="no-scrollbar min-h-0 flex-1 overflow-y-auto"
             >
               <div className="space-y-2 p-2.5">
-                {composeOpen ? (
+                {!convLoaded ? (
+                  <div className="grid h-40 place-items-center">
+                    <Loader label="loading" />
+                  </div>
+                ) : composeOpen ? (
                   composableFriends.length === 0 ? (
                     <p className="px-4 py-6 text-[13px] text-ink-soft">
                       {query
@@ -537,7 +557,7 @@ export function Messages() {
                   className="no-scrollbar min-h-0 flex-1 overflow-y-auto"
                 >
                   <div className="space-y-1 px-4 py-4">
-                    {loadingThread ? (
+                    {loadingThread || !convLoaded ? (
                       <div className="grid h-[40vh] place-items-center">
                         <Loader label="loading" />
                       </div>

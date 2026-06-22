@@ -3,12 +3,15 @@ import { AppShell } from './AppShell'
 import { Reveal } from '../ui/Reveal'
 
 /** Standard scrolling layout (Lobby, Practice, …). Header is rendered once and persists.
- *  Every page inherits one entrance animation here (re-keyed per route) — no per-page code. */
+ *  Every page inherits one entrance animation here, re-keyed per top-level SECTION (not the full
+ *  path) — so navigating within a section (e.g. switching DM threads at /messages/:id) updates in
+ *  place instead of remounting the page and refetching its data. */
 export function DefaultLayout() {
   const { pathname } = useLocation()
+  const section = pathname.split('/')[1] || 'home'
   return (
     <AppShell>
-      <Reveal key={pathname}>
+      <Reveal key={section}>
         <Outlet />
       </Reveal>
     </AppShell>

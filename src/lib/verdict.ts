@@ -1,13 +1,13 @@
 import type { Verdict } from '../types'
 
 export const VERDICT_LABEL: Record<Verdict, string> = {
-  PENDING: 'judging…',
+  PENDING: 'Processing…',
   ACCEPTED: 'Accepted',
   WRONG_ANSWER: 'Wrong Answer',
   TIME_LIMIT_EXCEEDED: 'Time Limit Exceeded',
   RUNTIME_ERROR: 'Runtime Error',
   COMPILE_ERROR: 'Compile Error',
-  INTERNAL_ERROR: 'Judging Error',
+  INTERNAL_ERROR: 'System Error',
 }
 
 // Theme-token tones for light-surface UI (scoreboard, feed).

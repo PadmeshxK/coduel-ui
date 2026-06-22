@@ -1,7 +1,6 @@
 import { http } from './http'
 import type {
   ChallengeData,
-  ExecutionData,
   ExecutionForm,
   FilterOptionsData,
   FriendData,
@@ -15,6 +14,7 @@ import type {
   ProblemSort,
   ProblemStatusFilter,
   RoomData,
+  RunAcceptedData,
   SubmissionData,
   SubmissionForm,
   UserProfile,
@@ -70,8 +70,9 @@ export const problemApi = {
 }
 
 export const executionApi = {
+  // Async: queues the run and returns its runId; the result arrives over /user/queue/run-result.
   execute: (form: ExecutionForm) =>
-    http.post<ExecutionData>('/code/execute', form).then((r) => r.data),
+    http.post<RunAcceptedData>('/code/execute', form).then((r) => r.data),
 }
 
 export const submissionApi = {

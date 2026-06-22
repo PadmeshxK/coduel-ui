@@ -1,46 +1,31 @@
-import { useEffect, useRef, useState } from 'react'
-import { Client } from '@stomp/stompjs'
-import { config } from '../lib/config'
+import { useEffect, useRef } from 'react'
+import { useStomp } from './useStomp'
 import type { MatchEventData } from '../types'
 
 /**
- * Connects a STOMP client over the native WebSocket and subscribes to /topic/match/{matchId}.
- * The session cookie rides the handshake (same-site), so the backend authenticates and the
- * MatchSubscriptionInterceptor authorizes the subscription. The publisher sends a JSON string,
- * so we parse the frame body. Returns the live connection status.
+ * Subscribes to /topic/match/{matchId} on the app's shared STOMP connection (see useStomp). The
+ * session cookie authenticated the socket at the handshake, and the MatchSubscriptionInterceptor
+ * authorizes this topic subscription. The publisher sends a JSON string, so we parse the frame body.
+ * Returns the shared connection's live status.
  */
 export function useMatchSocket(
   matchId: string | undefined,
   onEvent: (event: MatchEventData) => void,
 ) {
+  const { subscribe, connected } = useStomp()
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
-  const [connected, setConnected] = useState(false)
 
   useEffect(() => {
     if (!matchId) return
-
-    const client = new Client({
-      brokerURL: config.wsUrl,
-      reconnectDelay: 3000,
-      onConnect: () => {
-        setConnected(true)
-        client.subscribe(`/topic/match/${matchId}`, (frame) => {
-          try {
-            onEventRef.current(JSON.parse(frame.body) as MatchEventData)
-          } catch {
-            // ignore malformed frames
-          }
-        })
-      },
-      onWebSocketClose: () => setConnected(false),
+    return subscribe(`/topic/match/${matchId}`, (body) => {
+      try {
+        onEventRef.current(JSON.parse(body) as MatchEventData)
+      } catch {
+        // ignore malformed frames
+      }
     })
-
-    client.activate()
-    return () => {
-      void client.deactivate()
-    }
-  }, [matchId])
+  }, [matchId, subscribe])
 
   return { connected }
 }

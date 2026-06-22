@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Client } from '@stomp/stompjs'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Avatar } from '../components/ui/Avatar'
@@ -9,7 +8,7 @@ import { Reveal } from '../components/ui/Reveal'
 import { SectionLabel } from '../components/ui/SectionLabel'
 import { roomApi, friendApi, matchApi } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
-import { config } from '../lib/config'
+import { useStomp } from '../hooks/useStomp'
 import type { FriendData, RoomData, RoomEventData } from '../types'
 
 // Cool host marker — a small gold crown that sits above the host's avatar.
@@ -39,6 +38,7 @@ export function RoomPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
+  const { subscribe } = useStomp()
 
   const [room, setRoom] = useState<RoomData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -105,34 +105,24 @@ export function RoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, location.key])
 
-  // ---- room topic: roster changes, match start, room close ----
+  // ---- room topic (on the shared socket): roster changes, match start, room close ----
   useEffect(() => {
-    const client = new Client({
-      brokerURL: config.wsUrl,
-      reconnectDelay: 3000,
-      onConnect: () => {
-        client.subscribe(`/topic/room/${roomId}`, (frame) => {
-          if (leavingRef.current) return // we're on our way out — ignore our own leave's events
-          try {
-            const e = JSON.parse(frame.body) as RoomEventData
-            if (e.type === 'ROSTER_CHANGED') {
-              void roomApi.get(roomId).then(resolveRoom).catch(() => {})
-            } else if (e.type === 'MATCH_STARTED' && e.matchId) {
-              navigate(`/match/${e.matchId}`)
-            } else if (e.type === 'ROOM_CLOSED') {
-              // Don't yank them away silently — show the closed screen so they know what happened.
-              setClosed(true)
-            }
-          } catch {
-            // ignore malformed frames
-          }
-        })
-      },
+    return subscribe(`/topic/room/${roomId}`, (body) => {
+      if (leavingRef.current) return // we're on our way out — ignore our own leave's events
+      try {
+        const e = JSON.parse(body) as RoomEventData
+        if (e.type === 'ROSTER_CHANGED') {
+          void roomApi.get(roomId).then(resolveRoom).catch(() => {})
+        } else if (e.type === 'MATCH_STARTED' && e.matchId) {
+          navigate(`/match/${e.matchId}`)
+        } else if (e.type === 'ROOM_CLOSED') {
+          // Don't yank them away silently — show the closed screen so they know what happened.
+          setClosed(true)
+        }
+      } catch {
+        // ignore malformed frames
+      }
     })
-    client.activate()
-    return () => {
-      void client.deactivate()
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId])
 

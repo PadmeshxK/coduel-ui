@@ -258,6 +258,26 @@ export function MatchPage() {
 
   const { connected } = useMatchSocket(matchId, handleEvent)
 
+  // Catch-up after a WS reconnect: /topic is pub/sub with no replay, so anything published while we
+  // were dropped (notably MATCH_OVER) is lost. Re-read the authoritative match from the DB on the
+  // reconnect edge and reconcile the terminal state, so a blip can't strand us on the duel screen.
+  // (MatchData carries no live per-player progress, so the bars self-heal on the next event.)
+  const hadConnected = useRef(false)
+  useEffect(() => {
+    if (!matchId || !connected) return
+    if (hadConnected.current) {
+      void matchApi
+        .get(matchId)
+        .then((m) => {
+          setWinnerUserId(m.winnerUserId)
+          setForfeited(new Set(m.participants.filter((p) => p.forfeit).map((p) => p.userId)))
+          if (m.state !== 'ACTIVE') setEnded(true)
+        })
+        .catch(() => {})
+    }
+    hadConnected.current = true
+  }, [connected, matchId])
+
   const matchOver = ended
 
   // Momentum smooth-scroll for the live left panel, matching the rest of the site. Re-measures when
@@ -328,7 +348,7 @@ export function MatchPage() {
   async function handleSubmit() {
     if (!data) return
     setSubmitError(null)
-    setSubmitMsg('judging…')
+    setSubmitMsg('Processing…')
     try {
       const created = await submissionApi.create({
         problemId: data.problem.id,
@@ -346,7 +366,7 @@ export function MatchPage() {
         latest = await submissionApi.get(created.submissionId)
       }
       if (latest.verdict === 'PENDING') {
-        setSubmitMsg('still judging — taking longer than expected.')
+        setSubmitMsg('Still processing — taking longer than expected.')
       } else {
         if (user) {
           setProgress((prev) => ({
@@ -358,7 +378,7 @@ export function MatchPage() {
             },
           }))
         }
-        setSubmitMsg(latest.verdict === 'INTERNAL_ERROR' ? 'judging failed — please try again.' : null)
+        setSubmitMsg(latest.verdict === 'INTERNAL_ERROR' ? 'Something went wrong — please try again.' : null)
       }
     } catch (e) {
       setSubmitMsg(null)

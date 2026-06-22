@@ -9,6 +9,7 @@ import Editor, { useMonaco, type BeforeMount, type OnMount } from '@monaco-edito
 import { EditorPanel } from '../ui/EditorPanel'
 import { LanguageSelect } from '../ui/LanguageSelect'
 import { executionApi } from '../../lib/api'
+import { useStomp } from '../../hooks/useStomp'
 import { MONACO_LANGUAGE } from '../../lib/languages'
 import { clampOutput } from '../../lib/truncate'
 import { VERDICT_LABEL } from '../../lib/verdict'
@@ -212,6 +213,32 @@ export function CodeEditor({
   >([])
   const nextCaseId = useRef(1)
 
+  // Async runs: we POST the run, get a runId, then wait for its result on the shared socket.
+  const { subscribe } = useStomp()
+  const pendingRunId = useRef<string | null>(null)
+  const runTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const unsub = subscribe('/user/queue/run-result', (body) => {
+      try {
+        const data = JSON.parse(body) as ExecutionData
+        // Only the run we're currently waiting on (a stale result from a prior run is ignored).
+        if (data.runId && data.runId === pendingRunId.current) {
+          pendingRunId.current = null
+          if (runTimeout.current) clearTimeout(runTimeout.current)
+          setRunResult(data)
+          setBusy(null)
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    })
+    return () => {
+      unsub()
+      if (runTimeout.current) clearTimeout(runTimeout.current)
+    }
+  }, [subscribe])
+
   const addCase = () =>
     setCustomCases((c) =>
       c.length >= MAX_CUSTOM_CASES ? c : [...c, { id: nextCaseId.current++, input: '', expected: '' }],
@@ -262,12 +289,21 @@ export function CodeEditor({
       // Nothing to run against → a single empty-stdin run so the user still sees output.
       if (testCases.length === 0) testCases.push({ input: '', expectedOutput: '' })
 
-      // Same path as Submit: the backend compiles once, runs every case, and judges them.
-      const data = await executionApi.execute({ language, code, testCases })
-      setRunResult(data)
+      // Async: queue the run, then wait for the result on /user/queue/run-result (handled above).
+      // busy stays 'run' until the result arrives — the console shows the running state meanwhile.
+      const { runId } = await executionApi.execute({ language, code, testCases })
+      pendingRunId.current = runId
+      if (runTimeout.current) clearTimeout(runTimeout.current)
+      // Safety net so the console never hangs if the result never comes back.
+      runTimeout.current = setTimeout(() => {
+        if (pendingRunId.current === runId) {
+          pendingRunId.current = null
+          setRunError('Run timed out — please try again.')
+          setBusy(null)
+        }
+      }, 20_000)
     } catch (e) {
       setRunError(e instanceof Error ? e.message : 'Run failed')
-    } finally {
       setBusy(null)
     }
   }
@@ -423,7 +459,7 @@ export function CodeEditor({
               {busy && (
                 <span className="ml-2 flex items-center gap-1.5 font-mono text-[11px] text-gold">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold" />
-                  {busy === 'run' ? 'running' : 'judging'}
+                  {busy === 'run' ? 'running' : 'processing'}
                 </span>
               )}
               <button
@@ -846,5 +882,5 @@ function OutputPanel({
     return <div className="text-ink-soft">{disabledHint}</div>
   }
 
-  return <div className="text-ink-soft">Run to test, or Submit to judge against all tests.</div>
+  return <div className="text-ink-soft">Run to test, or Submit to check against all tests.</div>
 }

@@ -3,22 +3,30 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '../ui/Button'
 import { Loader } from '../ui/Loader'
 import { matchmakingApi } from '../../lib/api'
+import { useStomp } from '../../hooks/useStomp'
+import { useNotifications } from '../../hooks/useNotifications'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /**
- * Ranked-duel action: join the matchmaking queue and poll until an opponent is paired, then enter
- * the arena. The same button toggles to "Cancel search" while waiting; leaving mid-search drops us
- * out of the queue so we never become a ghost.
+ * Ranked-duel action: join the matchmaking queue and wait. When a pair is made the backend pushes
+ * MATCHMAKING_FOUND to both players over the shared socket (handled in useNotifications), which
+ * navigates us into the duel — no polling. We still navigate from the join response if WE were the
+ * one who completed the pair, and re-check authoritatively on a WS reconnect in case a push was missed.
+ * Leaving mid-search drops us out of the queue so we never become a ghost.
  */
 export function RankedDuelMode() {
   const navigate = useNavigate()
+  const { connected } = useStomp()
+  const { matchmakingFound } = useNotifications()
   const [searching, setSearching] = useState(false)
   const [found, setFound] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const active = useRef(true)
   const searchingRef = useRef(false)
   searchingRef.current = searching
+  const wasConnected = useRef(false)
+  const enteringRef = useRef(false)
 
   useEffect(() => {
     active.current = true
@@ -29,35 +37,56 @@ export function RankedDuelMode() {
     }
   }, [])
 
+  // Reconnected mid-search → a MATCHMAKING_FOUND push could have been missed (pub/sub has no replay),
+  // so re-check authoritatively and enter if we were paired while away.
+  useEffect(() => {
+    if (connected && wasConnected.current && searchingRef.current) {
+      void matchmakingApi
+        .status()
+        .then((res) => {
+          if (res.status === 'MATCHED' && res.matchId) enterMatch(res.matchId)
+        })
+        .catch(() => {})
+    }
+    if (connected) wasConnected.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected])
+
+  // Paired — the MATCHMAKING_FOUND push (delivered to BOTH players) lands here. Show the beat + enter.
+  useEffect(() => {
+    if (matchmakingFound && searchingRef.current) enterMatch(matchmakingFound.matchId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchmakingFound])
+
+  function enterMatch(matchId: number) {
+    if (!active.current || enteringRef.current) return
+    enteringRef.current = true // run the beat + navigate exactly once, whichever trigger fires first
+    // a deliberate "opponent found" cooldown so BOTH players see the confirmation before the jump
+    setFound(true)
+    void sleep(1000).then(() => {
+      if (active.current) navigate(`/match/${matchId}`)
+    })
+  }
+
   async function findDuel() {
     setError(null)
     setSearching(true)
     searchingRef.current = true
     try {
-      let res = await matchmakingApi.join()
-      // poll until an opponent is paired (or the user cancels)
-      while (active.current && searchingRef.current && res.status === 'WAITING') {
-        await sleep(2000)
-        if (!active.current || !searchingRef.current) return
-        res = await matchmakingApi.status()
+      const res = await matchmakingApi.join()
+      if (res.status === 'MATCHED' && res.matchId) {
+        enterMatch(res.matchId)
       }
-      // only enter the duel if we're still actively searching (not cancelled)
-      if (active.current && searchingRef.current && res.status === 'MATCHED' && res.matchId) {
-        // a brief "opponent found" beat so the handoff feels deliberate, not an instant jump
-        setFound(true)
-        await sleep(900)
-        if (active.current) navigate(`/match/${res.matchId}`)
-      }
+      // WAITING → stay searching; the MATCHMAKING_FOUND push navigates us in when someone pairs with us.
     } catch (e) {
       if (searchingRef.current) setError(e instanceof Error ? e.message : 'Matchmaking failed')
-    } finally {
-      if (active.current && !searchingRef.current) setFound(false)
+      searchingRef.current = false
       if (active.current) setSearching(false)
     }
   }
 
   async function cancelSearch() {
-    // Stop the poll loop immediately, then drop out of the queue.
+    // Stop searching immediately, then drop out of the queue.
     searchingRef.current = false
     setSearching(false)
     setFound(false)

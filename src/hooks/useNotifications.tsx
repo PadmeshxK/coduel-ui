@@ -3,14 +3,12 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useRef,
   useState,
 } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Client } from '@stomp/stompjs'
-import { config } from '../lib/config'
 import { useAuth } from './useAuth'
+import { useStomp } from './useStomp'
 import { friendApi, notificationApi } from '../lib/api'
 import type { NotificationData } from '../types'
 
@@ -65,6 +63,9 @@ interface NotificationsState {
   // Set (rising tick) when a duel challenge WE sent is declined — the challenger's Play card drops its
   // "waiting…" state for that opponent. userId is the decliner; name is shown in the "declined" note.
   declinedChallenge: { userId: number; name: string; tick: number } | null
+  // Set (rising tick) when ranked matchmaking pairs us — RankedDuelMode shows an "opponent found"
+  // beat, then navigates both players into the duel after a short cooldown.
+  matchmakingFound: { matchId: number; tick: number } | null
 }
 
 const NotificationsContext = createContext<NotificationsState>({
@@ -78,6 +79,7 @@ const NotificationsContext = createContext<NotificationsState>({
   notifyFriendsChanged: () => {},
   declinedRequest: null,
   declinedChallenge: null,
+  matchmakingFound: null,
 })
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
@@ -89,7 +91,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const [friendsVersion, setFriendsVersion] = useState(0)
   const [declinedRequest, setDeclinedRequest] = useState<{ userId: number; tick: number } | null>(null)
   const [declinedChallenge, setDeclinedChallenge] = useState<{ userId: number; name: string; tick: number } | null>(null)
-  const clientRef = useRef<Client | null>(null)
+  const [matchmakingFound, setMatchmakingFound] = useState<{ matchId: number; tick: number } | null>(null)
+  const { subscribe } = useStomp()
 
   // Authoritative reload — GET /notification is the full pending set (invites in Redis, requests in
   // DB), so a replace correctly drops anything that's no longer pending (e.g. an accepted request).
@@ -164,6 +167,13 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       navigate(`/match/${incoming.matchId}`)
       return
     }
+    // Ranked matchmaking paired us (pushed to both players) — signal RankedDuelMode to show the
+    // "opponent found" beat and navigate both players in after a short cooldown (no polling).
+    if (incoming.type === 'MATCHMAKING_FOUND' && incoming.matchId) {
+      const matchId = incoming.matchId
+      setMatchmakingFound((prev) => ({ matchId, tick: (prev?.tick ?? 0) + 1 }))
+      return
+    }
     // A challenge we sent was declined — signal the challenger's Play card to drop "waiting…". No bell.
     if (incoming.type === 'CHALLENGE_DECLINED') {
       setDeclinedChallenge((prev) => ({
@@ -186,35 +196,22 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   }, [navigate])
 
   useEffect(() => {
-    // Wait until auth is resolved. If no user, do nothing (the WS handshake would fail).
+    // Wait until auth is resolved. If no user, do nothing (the shared socket isn't up yet).
     if (loading || !user) return
 
     // Hydrate from whatever's already pending so a reload / offline gap doesn't hide notifications.
     refresh()
 
-    // Live feed for anything that arrives while the app is open.
-    const client = new Client({
-      brokerURL: config.wsUrl,
-      reconnectDelay: 5000,
-      onConnect: () => {
-        // /user/queue/notification is routed exclusively to this session's principal.
-        client.subscribe('/user/queue/notification', (frame) => {
-          try {
-            append(JSON.parse(frame.body) as NotificationData)
-          } catch {
-            // ignore malformed frames
-          }
-        })
-      },
+    // Live feed on the shared connection — /user/queue/notification is routed to this session only.
+    const unsubscribe = subscribe('/user/queue/notification', (body) => {
+      try {
+        append(JSON.parse(body) as NotificationData)
+      } catch {
+        // ignore malformed frames
+      }
     })
-    client.activate()
-    clientRef.current = client
-
-    return () => {
-      void client.deactivate()
-      clientRef.current = null
-    }
-  }, [user, loading, refresh, append])
+    return unsubscribe
+  }, [user, loading, refresh, append, subscribe])
 
   return (
     <NotificationsContext.Provider
@@ -229,6 +226,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         notifyFriendsChanged,
         declinedRequest,
         declinedChallenge,
+        matchmakingFound,
       }}
     >
       {children}

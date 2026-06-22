@@ -118,6 +118,8 @@ export interface ExecutionForm {
 }
 
 export interface ExecutionData {
+  // Set when delivered over /user/queue/run-result — correlates to the run the client is awaiting.
+  runId?: string | null
   verdict: Verdict
   passedTests: number | null
   totalTests: number
@@ -127,6 +129,11 @@ export interface ExecutionData {
   failedInput: string | null
   expectedOutput: string | null
   compilerLogs: string | null
+}
+
+/** POST /code/execute (202) — the run was queued; await its result on /user/queue/run-result. */
+export interface RunAcceptedData {
+  runId: string
 }
 
 /** POST /submission (userId comes from the session, never the body). */
@@ -237,6 +244,7 @@ export type NotificationEventType =
   | 'DUEL_CHALLENGE'
   | 'CHALLENGE_ACCEPTED'
   | 'CHALLENGE_DECLINED'
+  | 'MATCHMAKING_FOUND'
 
 /** Pushed over /user/queue/notification via STOMP, and returned by GET /notification on load. */
 export interface NotificationData {

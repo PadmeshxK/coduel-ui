@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Collapsible } from '../components/ui/Collapsible'
 import { CodeEditor } from '../components/editor/CodeEditor'
@@ -11,11 +11,11 @@ import { problemApi, submissionApi } from '../lib/api'
 import { loadPracticeFilter } from '../lib/practiceFilter'
 import { useAsync } from '../hooks/useAsync'
 import { useLenisBox } from '../hooks/useLenisBox'
+import { useStomp } from '../hooks/useStomp'
 import { VERDICT_LABEL, verdictTone } from '../lib/verdict'
 import { FILE_EXT } from '../lib/languages'
 import type { SubmissionData, Verdict, Language } from '../types'
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // Per-problem code + language cache (practice only) so progress isn't lost on reload/navigation.
 const draftKey = (slug?: string) => `coduel:draft:${slug ?? ''}`
@@ -70,6 +70,38 @@ export function Solve() {
     setLanguage(savedLang === 'CPP' || savedLang === 'PYTHON' ? savedLang : 'PYTHON')
   }, [slug])
 
+  // Solo submissions are judged async and the result is pushed to /user/queue/submission-result on
+  // the shared socket (no polling). We match it to the submission we're waiting on by id.
+  const { subscribe } = useStomp()
+  const pendingSubmissionId = useRef<number | null>(null)
+  const submitTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const applyResult = useCallback((s: SubmissionData) => {
+    setVerdict(s.verdict)
+    setSubmitInfo({ passed: s.passedTests, total: s.totalTests })
+    if (s.verdict === 'ACCEPTED') setShowCelebration(true)
+    setSubs((prev) => [s, ...prev.filter((x) => x.submissionId !== s.submissionId)])
+  }, [])
+
+  useEffect(() => {
+    const unsub = subscribe('/user/queue/submission-result', (body) => {
+      try {
+        const s = JSON.parse(body) as SubmissionData
+        if (s.submissionId === pendingSubmissionId.current) {
+          pendingSubmissionId.current = null
+          if (submitTimeout.current) clearTimeout(submitTimeout.current)
+          applyResult(s)
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    })
+    return () => {
+      unsub()
+      if (submitTimeout.current) clearTimeout(submitTimeout.current)
+    }
+  }, [subscribe, applyResult])
+
   const latestSub = subs[0] ?? null
   // Permanent solved state: any accepted attempt counts, even if a later submission was wrong.
   const solved = subs.some((s) => s.verdict === 'ACCEPTED')
@@ -96,18 +128,21 @@ export function Solve() {
         language,
         sourceCode: code,
       })
-      let latest = created
-      // Poll past the consumer retry window so a failed judge surfaces as INTERNAL_ERROR
-      // (pushed once the message is dead-lettered) rather than hanging on "judging…".
-      for (let i = 0; i < 30 && latest.verdict === 'PENDING'; i++) {
-        await sleep(1000)
-        latest = await submissionApi.get(created.submissionId)
-      }
-      setVerdict(latest.verdict)
-      setSubmitInfo({ passed: latest.passedTests, total: latest.totalTests })
-      if (latest.verdict === 'ACCEPTED') setShowCelebration(true)
-      // prepend the just-judged submission to the history — we already have it, no extra fetch
-      setSubs((prev) => [latest, ...prev])
+      pendingSubmissionId.current = created.submissionId
+      if (submitTimeout.current) clearTimeout(submitTimeout.current)
+      // Fallback: if the push never lands (e.g. dead-lettered before the INTERNAL_ERROR push), fetch
+      // once past the consumer retry window rather than hanging on "judging…".
+      submitTimeout.current = setTimeout(() => {
+        if (pendingSubmissionId.current === created.submissionId) {
+          pendingSubmissionId.current = null
+          void submissionApi
+            .get(created.submissionId)
+            .then(applyResult)
+            .catch(() =>
+              setSubmitError('This is taking longer than usual — refresh to see the result.'),
+            )
+        }
+      }, 35_000)
     } catch (e) {
       setVerdict(null)
       setSubmitError(e instanceof Error ? e.message : 'Submit failed')
@@ -118,7 +153,7 @@ export function Solve() {
     <div className="text-accent">error: {submitError}</div>
   ) : (
     <>
-      <div className="text-ink-soft">queued for async judging…</div>
+      {(!verdict || verdict === 'PENDING') && <div className="text-ink-soft">Processing…</div>}
       {verdict && (
         <div>
           verdict: <span className={verdictTone(verdict)}>{VERDICT_LABEL[verdict]}</span>

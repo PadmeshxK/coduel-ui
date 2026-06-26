@@ -26,23 +26,16 @@ const PresenceContext = createContext<PresenceState>({ isOnline: () => false })
  */
 export function PresenceProvider({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
-  const { subscribe } = useStomp()
+  const { subscribe, connected } = useStomp()
   const [online, setOnline] = useState<Set<number>>(new Set())
 
+  // Live transitions: subscribe once (the Stomp client re-applies it across reconnects).
   useEffect(() => {
     if (loading || !user) {
       setOnline(new Set())
       return
     }
-    let active = true
-    presenceApi
-      .onlineFriends()
-      .then((ids) => {
-        if (active) setOnline(new Set(ids))
-      })
-      .catch(() => {})
-
-    const unsubscribe = subscribe('/user/queue/presence', (body) => {
+    return subscribe('/user/queue/presence', (body) => {
       try {
         const p = JSON.parse(body) as PresenceData
         setOnline((prev) => {
@@ -55,11 +48,24 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
         // ignore malformed frames
       }
     })
+  }, [user, loading, subscribe])
+
+  // Seed / re-seed the authoritative online set on every (re)connect — NOT once at mount. The broker
+  // has no replay, so a friend's "online" broadcast fired while we were mid-connect is missed live; and
+  // on a simultaneous login the old one-shot mount seed ran before either side had registered its
+  // session, leaving BOTH stuck "offline". Re-pulling once the socket is up (our subscription is already
+  // live by then, applied in onConnect) recovers both cases and self-heals after any drop.
+  useEffect(() => {
+    if (loading || !user || !connected) return
+    let active = true
+    presenceApi
+      .onlineFriends()
+      .then((ids) => active && setOnline(new Set(ids)))
+      .catch(() => {})
     return () => {
       active = false
-      unsubscribe()
     }
-  }, [user, loading, subscribe])
+  }, [user, loading, connected])
 
   const isOnline = useCallback((userId: number) => online.has(userId), [online])
   const value = useMemo(() => ({ isOnline }), [isOnline])

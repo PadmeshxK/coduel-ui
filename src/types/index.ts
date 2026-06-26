@@ -149,6 +149,58 @@ export interface ConversationData {
   lastSenderId: number | null
   // True when there's a newer message from the other person than your read marker (server-tracked).
   unread: boolean
+  // The other person's read marker (epoch ms) — how far they've read; seeds the "Seen …" receipt.
+  otherLastReadAtMs: number | null
+  // Your private personalization for this thread (ConversationSetting): a nickname for the other
+  // person, a per-DM accent for the row, and whether you've muted them.
+  nickname: string | null
+  accentHex: string | null
+  muted: boolean
+}
+
+export type ThemeMode = 'INHERIT' | 'LIGHT' | 'DARK'
+export type BackgroundPreset =
+  | 'PARCHMENT'
+  | 'SUNSET'
+  | 'BLUEPRINT'
+  | 'FOREST'
+  | 'ESPRESSO'
+  | 'AURORA'
+  | 'OCEAN'
+  | 'ROSE'
+  | 'MIDNIGHT'
+  | 'IMAGE'
+export type BubbleStyle = 'ROUNDED' | 'PILL' | 'MINIMAL'
+export type MessageFont = 'SANS' | 'SERIF' | 'MONO'
+export type MessageTextSize = 'SMALL' | 'MEDIUM' | 'LARGE'
+export type MessageDensity = 'COZY' | 'COMPACT'
+
+// One DM thread's personalization — your private view of the conversation with `peerUserId`.
+export interface ConversationSettingData {
+  peerUserId: number
+  themeMode: ThemeMode
+  accentHex: string | null
+  backgroundPreset: BackgroundPreset
+  backgroundImageUrl: string | null
+  backgroundDim: number
+  backgroundBlur: number
+  bubbleStyle: BubbleStyle
+  messageFont: MessageFont
+  messageTextSize: MessageTextSize
+  messageDensity: MessageDensity
+  nickname: string | null
+  quickReactionEmoji: string
+  readReceiptsEnabled: boolean
+  muted: boolean
+  archived: boolean
+  disappearingTtlSeconds: number | null
+}
+
+/** Pushed on /user/queue/chat-read when the other participant reads the thread — live "Seen" update. */
+export interface ReadReceiptData {
+  conversationId: number
+  readerUserId: number
+  readAtMs: number
 }
 
 /** A friend's online/offline transition, pushed live over /user/queue/presence. */
@@ -162,6 +214,31 @@ export interface TypingData {
   fromUserId: number
 }
 
+/** A reaction on a message — who reacted and with what (one per user per message). */
+export interface ReactionData {
+  userId: number
+  emoji: string
+}
+
+/** The quoted snippet shown above a reply. */
+export interface ReplyPreview {
+  messageId: number
+  senderId: number
+  preview: string
+  // The quoted message's kind, so the quote shows a label ("Photo"/"Code snippet"/"Duel challenge"/
+  // "Voice message") for media instead of an empty body.
+  kind?: 'TEXT' | 'CODE' | 'IMAGE' | 'PROBLEM_SHARE' | 'VOICE' | null
+}
+
+/** Pushed on /user/queue/dm-reaction when the other participant reacts / clears a reaction. */
+export interface ReactionEventData {
+  conversationId: number
+  messageId: number
+  userId: number
+  emoji: string | null
+  removed: boolean
+}
+
 /** A single DM — from a thread page or pushed live over /user/queue/dm. */
 export interface MessageData {
   messageId: number
@@ -169,6 +246,60 @@ export interface MessageData {
   senderId: number
   body: string
   createdAtMs: number | null
+  // Reactions on this message (empty for a freshly-sent / live-pushed message).
+  reactions: ReactionData[]
+  // Set when this message is a reply: the target id + a quoted preview (null preview if original gone).
+  replyToId: number | null
+  replyTo: ReplyPreview | null
+  // Non-null once edited; deleted=true → render a tombstone (body is blanked server-side).
+  editedAtMs: number | null
+  deleted: boolean
+  // "TEXT" / "CODE" / "IMAGE" / "PROBLEM_SHARE" / "VOICE". codeLanguage→CODE, attachmentUrl→IMAGE &
+  // VOICE, sharedRef→PROBLEM_SHARE (slug), durationMs→VOICE (clip length).
+  kind: 'TEXT' | 'CODE' | 'IMAGE' | 'PROBLEM_SHARE' | 'VOICE'
+  codeLanguage: string | null
+  attachmentUrl: string | null
+  sharedRef: string | null
+  durationMs: number | null
+}
+
+/** GET /chat/search — a message hit with the thread (other participant) it belongs to. */
+export interface MessageSearchData {
+  messageId: number
+  conversationId: number
+  senderId: number
+  snippet: string
+  kind: 'TEXT' | 'CODE' | 'IMAGE' | 'PROBLEM_SHARE' | 'VOICE'
+  createdAtMs: number | null
+  otherUserId: number
+  otherDisplayName: string | null
+  otherAvatarUrl: string | null
+}
+
+/** A pinned message as shown in the pin bar (pins are shared per conversation). */
+export interface PinnedMessageData {
+  messageId: number
+  senderId: number
+  preview: string
+  pinnedByUserId: number
+  kind: 'TEXT' | 'CODE' | 'IMAGE' | 'PROBLEM_SHARE' | 'VOICE'
+}
+
+/** Pushed on /user/queue/dm-pin when a message is pinned/unpinned. */
+export interface PinEventData {
+  conversationId: number
+  messageId: number
+  pinned: boolean
+  pin: PinnedMessageData | null
+}
+
+/** Pushed on /user/queue/dm-update when a message is edited or deleted (merged into the existing one). */
+export interface MessageUpdateData {
+  conversationId: number
+  messageId: number
+  body: string
+  editedAtMs: number | null
+  deleted: boolean
 }
 
 /** POST /submission (userId comes from the session, never the body). */
@@ -288,6 +419,7 @@ export type NotificationEventType =
   | 'DUEL_CHALLENGE'
   | 'CHALLENGE_ACCEPTED'
   | 'CHALLENGE_DECLINED'
+  | 'CHALLENGE_WITHDRAWN'
   | 'MATCHMAKING_FOUND'
   | 'DM_RECEIVED'
 
@@ -297,7 +429,9 @@ export interface NotificationData {
   roomId?: number | null // ROOM_INVITE — the room to join
   requestId?: number | null // FRIEND_REQUEST — the request to accept/decline
   challengeId?: string | null // DUEL_CHALLENGE — the challenge to accept/decline
+  problemSlug?: string | null // DUEL_CHALLENGE — optional specific problem (a shared-problem challenge)
   matchId?: number | null // CHALLENGE_ACCEPTED — the duel match to jump into
+  messageKind?: string | null // DM_RECEIVED — kind of message, so the toast/bell says what they sent
   fromUserId: number
   fromDisplayName: string | null
   fromAvatarUrl: string | null

@@ -7,6 +7,7 @@ import { ProblemStatement } from '../components/ui/ProblemStatement'
 import { Loader } from '../components/ui/Loader'
 import { Reveal } from '../components/ui/Reveal'
 import { StatusPill } from '../components/ui/StatusPill'
+import { ChallengeFriendButton } from '../components/share/ChallengeFriendButton'
 import { problemApi, submissionApi } from '../lib/api'
 import { loadPracticeFilter } from '../lib/practiceFilter'
 import { useAsync } from '../hooks/useAsync'
@@ -229,15 +230,18 @@ export function Solve() {
             )}
             </div>
 
-            {/* jump to the next problem in the filter the user browsed with (practice only) */}
-            {nextSlug && (
-              <Link
-                to={`/practice/${nextSlug}`}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-line bg-paper-2 px-4 py-2 font-mono text-[12px] uppercase tracking-[0.1em] text-ink-soft transition hover:border-ink-soft/50 hover:text-ink"
-              >
-                Next problem →
-              </Link>
-            )}
+            {/* challenge a friend to a duel on this problem + jump to the next problem in the browsed filter */}
+            <div className="flex shrink-0 items-center gap-2.5">
+              {slug && <ChallengeFriendButton slug={slug} />}
+              {nextSlug && (
+                <Link
+                  to={`/practice/${nextSlug}`}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-line bg-paper-2 px-4 py-2 font-mono text-[12px] uppercase tracking-[0.1em] text-ink-soft transition hover:border-ink-soft/50 hover:text-ink"
+                >
+                  Next problem →
+                </Link>
+              )}
+            </div>
           </div>
 
           <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-[22px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] lg:grid-rows-none">

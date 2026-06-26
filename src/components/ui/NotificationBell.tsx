@@ -4,6 +4,7 @@ import { Avatar } from './Avatar'
 import { Button } from './Button'
 import { challengeApi, friendApi, roomApi } from '../../lib/api'
 import { useNotifications, notificationKey } from '../../hooks/useNotifications'
+import { dmNotificationText } from '../../lib/messageKind'
 import type { NotificationData } from '../../types'
 
 function timeAgo(ms?: number | null): string {
@@ -141,7 +142,7 @@ function NotificationRow({
         <div className="min-w-0 flex-1">
           <p className="text-[13px] leading-snug">
             <span className="font-semibold">{fromName}</span>{' '}
-            <span className="text-ink-soft">sent you a message</span>
+            <span className="text-ink-soft">{dmNotificationText(notification.messageKind).action}</span>
           </p>
           {notification.createdAtMs != null && (
             <span className="mt-0.5 block font-mono text-[10px] text-ink-soft">

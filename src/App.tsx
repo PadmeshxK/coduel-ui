@@ -61,16 +61,6 @@ function App() {
               </RequireAuth>
             }
           />
-          {/* One route with an optional param so switching threads updates the param in place
-              (no remount / full-page reload) — only the right panel re-renders. */}
-          <Route
-            path="/messages/:userId?"
-            element={
-              <RequireAuth>
-                <Messages />
-              </RequireAuth>
-            }
-          />
           <Route
             path="/room/:roomId"
             element={
@@ -98,6 +88,16 @@ function App() {
             element={
               <RequireAuth>
                 <MatchPage />
+              </RequireAuth>
+            }
+          />
+          {/* DMs fill the viewport like the IDE pages so the chat never causes page scroll. One route
+              with an optional param so switching threads updates the param in place (no remount). */}
+          <Route
+            path="/messages/:userId?"
+            element={
+              <RequireAuth>
+                <Messages />
               </RequireAuth>
             }
           />

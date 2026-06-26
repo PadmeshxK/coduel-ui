@@ -6,10 +6,10 @@ export function StatusPill({ verdict, className = '' }: { verdict: Verdict; clas
   const { label, tone } = STATUS_META[problemStatus(verdict)]
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border border-line bg-paper-2 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] ${tone} ${className}`}
+      className={`inline-flex items-center rounded-full border border-line bg-paper-2 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] ${tone} ${className}`}
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {label}
+      {/* -mr compensates the trailing letter-spacing so the label sits centered in the pill */}
+      <span className="-mr-[0.14em]">{label}</span>
     </span>
   )
 }

@@ -76,7 +76,7 @@ export function NameSetup() {
       <div className="flex flex-1 items-center justify-center px-6">
         <div className="animate-reveal w-full max-w-md">
           <div className="mb-3 text-center font-mono text-xs uppercase tracking-[0.18em] text-accent">
-            ● One last step
+            One last step
           </div>
           <h1 className="text-center font-display text-[36px] font-extrabold leading-[1.08] tracking-[-0.03em] sm:text-[42px]">
             Choose your display name

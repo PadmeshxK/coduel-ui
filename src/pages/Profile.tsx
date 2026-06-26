@@ -108,11 +108,11 @@ export function Profile() {
 
   return (
     <>
-      <div className="mb-8 mt-10">
-        <div className="mb-2.5 font-mono text-xs uppercase tracking-[0.18em] text-accent">
-          ● Account
+      <div className="mb-8 mt-10 [@media(max-height:780px)]:mb-2 [@media(max-height:780px)]:mt-6">
+        <div className="mb-2.5 font-mono text-xs uppercase tracking-[0.18em] text-accent [@media(max-height:780px)]:hidden">
+          Account
         </div>
-        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[54px] lg:leading-none">
+        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[54px] lg:leading-none [@media(max-height:780px)]:!text-[24px] [@media(max-height:780px)]:!leading-tight">
           Profile
         </h1>
       </div>
@@ -133,7 +133,7 @@ export function Profile() {
               </div>
               {dirty && (
                 <span className="rounded-full border border-accent px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-accent">
-                  ● preview · unsaved
+                  preview · unsaved
                 </span>
               )}
             </div>

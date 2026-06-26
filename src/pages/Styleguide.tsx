@@ -20,7 +20,7 @@ export function Styleguide() {
     <>
       <div className="mt-8">
         <div className="mb-2.5 font-mono text-xs uppercase tracking-[0.18em] text-accent">
-          ● Design System
+          Design System
         </div>
         <h1 className="font-display text-[54px] font-extrabold leading-none tracking-[-0.035em]">
           Primitives

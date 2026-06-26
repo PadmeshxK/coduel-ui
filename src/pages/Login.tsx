@@ -13,7 +13,7 @@ export function Login() {
       <div className="flex flex-1 items-center justify-center px-6">
         <div className="animate-reveal w-full max-w-md text-center">
           <div className="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-accent">
-            ● 1v1 coding duels
+            1v1 coding duels
           </div>
           <h1 className="font-display text-[44px] font-extrabold leading-[1.05] tracking-[-0.035em]">
             Experience live coding duels

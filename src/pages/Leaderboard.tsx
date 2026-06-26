@@ -74,14 +74,14 @@ export function Leaderboard() {
 
   return (
     <>
-      <div className="mb-8 mt-10">
-        <div className="mb-2.5 font-mono text-xs uppercase tracking-[0.18em] text-accent">
-          ● Leaderboard
+      <div className="mb-8 mt-10 [@media(max-height:780px)]:mb-2 [@media(max-height:780px)]:mt-6">
+        <div className="mb-2.5 font-mono text-xs uppercase tracking-[0.18em] text-accent [@media(max-height:780px)]:hidden">
+          Leaderboard
         </div>
-        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[54px] lg:leading-none">
+        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[54px] lg:leading-none [@media(max-height:780px)]:!text-[24px] [@media(max-height:780px)]:!leading-tight">
           The standings
         </h1>
-        <p className="mt-4 text-ink-soft">
+        <p className="mt-4 text-ink-soft [@media(max-height:780px)]:hidden">
           Ranked by duels won
         </p>
       </div>

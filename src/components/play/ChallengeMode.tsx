@@ -44,6 +44,13 @@ export function ChallengeMode() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [declinedChallenge])
 
+  // Clear the "declined — try another" note after a few seconds so it doesn't linger forever.
+  useEffect(() => {
+    if (!declined) return
+    const t = setTimeout(() => setDeclined(null), 5000)
+    return () => clearTimeout(t)
+  }, [declined])
+
   // A sent challenge self-expires (~90s) if unanswered — mirror that so we don't wait forever.
   useEffect(() => {
     if (!pending) return

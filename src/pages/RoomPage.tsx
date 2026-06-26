@@ -9,6 +9,8 @@ import { SectionLabel } from '../components/ui/SectionLabel'
 import { roomApi, friendApi, matchApi } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { useStomp } from '../hooks/useStomp'
+import { useLenisBox } from '../hooks/useLenisBox'
+import type Lenis from 'lenis'
 import type { FriendData, RoomChatData, RoomData, RoomEventData } from '../types'
 
 // Cool host marker — a small gold crown that sits above the host's avatar.
@@ -38,7 +40,7 @@ export function RoomPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
-  const { subscribe, publish } = useStomp()
+  const { subscribe, publish, connected } = useStomp()
 
   const [room, setRoom] = useState<RoomData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -54,6 +56,9 @@ export function RoomPage() {
   const [chat, setChat] = useState<RoomChatData[]>([])
   const [chatInput, setChatInput] = useState('')
   const chatScrollRef = useRef<HTMLDivElement>(null)
+  const chatLenis = useRef<Lenis | null>(null)
+  // First fill jumps to the latest; after that we only auto-follow if you're already near the bottom.
+  const chatInitedRef = useRef(false)
 
   const seatRowRef = useRef<HTMLDivElement>(null)
   // Seat positions are stored RELATIVE TO THE SEAT ROW (not the viewport), so page scroll or layout
@@ -132,6 +137,19 @@ export function RoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId])
 
+  // ---- reconnect catch-up: /topic is fire-and-forget with no replay, so a ROSTER_CHANGED published
+  // while our socket was briefly down (e.g. someone readied up during a blip) is lost forever and the
+  // roster only fixes itself on a manual refresh. Re-fetch the room on every RE-connect so it self-heals.
+  const hadConnectedRef = useRef(false)
+  useEffect(() => {
+    if (!connected) return
+    if (hadConnectedRef.current && !leavingRef.current) {
+      void roomApi.get(roomId).then(resolveRoom).catch(() => {})
+    }
+    hadConnectedRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, roomId])
+
   // ---- lobby chat (members only): hydrate recent history + live updates on the chat sub-topic ----
   useEffect(() => {
     let activeChat = true
@@ -151,18 +169,37 @@ export function RoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId])
 
-  // Keep the latest chat line in view — scroll the chat box itself (NOT scrollIntoView, which would
-  // also scroll the whole page and throw off the seat-row FLIP measurements).
+  // Momentum smooth-scroll for the chat box (matches the DM thread + the rest of the site).
+  useLenisBox(chatScrollRef, [chat.length], chatLenis)
+
+  // Keep the latest line in view via Lenis (smooth) — falls back to native if Lenis is off (reduced
+  // motion). On first fill, jump to the bottom; afterwards only follow if you're already near it.
   useEffect(() => {
     const el = chatScrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+    const lenis = chatLenis.current
+    const toBottom = (immediate: boolean) => {
+      if (lenis) {
+        lenis.resize()
+        lenis.scrollTo(el.scrollHeight, immediate ? { immediate: true } : {})
+      } else {
+        el.scrollTop = el.scrollHeight
+      }
+    }
+    if (!chatInitedRef.current) {
+      toBottom(true)
+      if (chat.length > 0) chatInitedRef.current = true
+      return
+    }
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    if (nearBottom) toBottom(false)
   }, [chat])
 
   function sendChat() {
     const text = chatInput.trim()
     if (!text) return
     // The broadcast echoes back to us via the topic, so no optimistic append — it arrives live.
-    publish(`/app/room/${roomId}/chat`, text)
+    publish(`/app/chat/room/${roomId}`, text)
     setChatInput('')
   }
 
@@ -321,7 +358,7 @@ export function RoomPage() {
               </svg>
             </div>
             <div className="mt-4 font-mono text-[11px] uppercase tracking-[0.18em] text-accent">
-              ● Room closed
+              Room closed
             </div>
             <h1 className="mt-2 font-display text-[26px] font-extrabold leading-tight tracking-[-0.02em]">
               This room has closed
@@ -398,8 +435,8 @@ export function RoomPage() {
 
   return (
     <Reveal>
-      <div className="mt-10">
-        <div className="mb-2.5 flex items-center gap-2 font-mono text-xs uppercase tracking-[0.18em] text-accent">
+      <div className="mt-10 [@media(max-height:780px)]:mt-6">
+        <div className="mb-2.5 flex items-center gap-2 font-mono text-xs uppercase tracking-[0.18em] text-accent [@media(max-height:780px)]:hidden">
           {/* live pulse — the room is open and waiting */}
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
@@ -407,17 +444,17 @@ export function RoomPage() {
           </span>
           Private room · #{roomId}
         </div>
-        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[52px] lg:leading-none">
+        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[52px] lg:leading-none [@media(max-height:780px)]:!text-[24px] [@media(max-height:780px)]:!leading-tight">
           The lobby
         </h1>
-        <p className="mt-4 max-w-xl text-ink-soft">
+        <p className="mt-4 max-w-xl text-ink-soft [@media(max-height:780px)]:hidden">
           {room.host
             ? 'Pull in your friends and hit start when you’re ready'
             : 'You’re in. Sit tight — the host drops everyone into the problem at the same moment.'}
         </p>
 
         {/* lobby grid — players + invite on the left, chat alongside on the right (all in view) */}
-        <div className="mt-8 grid gap-[22px] lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="mt-8 grid gap-[22px] lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
           <div className="space-y-[22px]">
             {/* seats — the room filling up */}
             <Card>
@@ -507,7 +544,10 @@ export function RoomPage() {
                   : 'Everyone’s already here.'}
               </p>
             ) : (
-              <div className="mt-3.5 flex flex-wrap gap-2">
+              <div
+                data-lenis-prevent
+                className="no-scrollbar mt-3.5 flex max-h-[184px] flex-wrap gap-2 overflow-y-auto"
+              >
                 {uninvitedFriends.map((f) => {
                   const sent = inviteSent.has(f.userId)
                   const loading = inviting === f.userId
@@ -556,10 +596,11 @@ export function RoomPage() {
             <div
               ref={chatScrollRef}
               data-lenis-prevent
-              className="no-scrollbar mt-3 h-[280px] space-y-2.5 overflow-y-auto pr-1 lg:h-auto lg:min-h-0 lg:flex-1"
+              className="no-scrollbar mt-3 h-[280px] overflow-y-auto pr-1 lg:h-[52vh]"
             >
+              <div className="flex min-h-full flex-col space-y-2.5">
               {chat.length === 0 ? (
-                <div className="grid h-full place-items-center px-6 text-center">
+                <div className="grid flex-1 place-items-center px-6 text-center">
                   <div>
                     <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-2xl border border-line bg-paper text-ink-soft">
                       <svg
@@ -588,7 +629,7 @@ export function RoomPage() {
                   return (
                     <div
                       key={`${m.createdAtMs}-${m.senderId}-${i}`}
-                      className={`flex items-end gap-2 ${mine ? 'justify-end' : 'justify-start'}`}
+                      className={`animate-reveal flex items-end gap-2 ${mine ? 'justify-end' : 'justify-start'}`}
                     >
                       {!mine && (
                         <Avatar
@@ -616,6 +657,7 @@ export function RoomPage() {
                   )
                 })
               )}
+              </div>
             </div>
 
             <div className="mt-3 flex items-center gap-2">

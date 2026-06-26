@@ -5,6 +5,7 @@ import { Button } from './Button'
 import { Toast } from './Toast'
 import { challengeApi, friendApi, roomApi } from '../../lib/api'
 import { useNotifications, notificationKey, type FlashToast } from '../../hooks/useNotifications'
+import { dmNotificationText } from '../../lib/messageKind'
 import type { NotificationData } from '../../types'
 
 // How long a toast lingers before it slips away on its own. The notification itself lives on in the
@@ -76,10 +77,12 @@ function FlashCard({ toast }: { toast: FlashToast }) {
         >
           <Avatar initial={toast.name.charAt(0).toUpperCase()} src={toast.avatarUrl} size={40} />
           <div className="min-w-0 flex-1">
-            <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-accent">● Message</p>
+            <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-accent">
+              {dmNotificationText(toast.messageKind).kicker}
+            </p>
             <p className="mt-1 text-[14px] font-semibold leading-snug">
               <span className="text-ink">{toast.name}</span>{' '}
-              <span className="text-ink-soft">sent you a message</span>
+              <span className="text-ink-soft">{dmNotificationText(toast.messageKind).action}</span>
             </p>
           </div>
         </button>
@@ -93,7 +96,7 @@ function FlashCard({ toast }: { toast: FlashToast }) {
       <div className="flex items-center gap-3">
         <Avatar initial={toast.name.charAt(0).toUpperCase()} src={toast.avatarUrl} size={40} />
         <div className="min-w-0 flex-1">
-          <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-accent-2">● Friends</p>
+          <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-accent-2">Friends</p>
           <p className="mt-1 text-[14px] font-semibold leading-snug">
             <span className="text-ink">You and {toast.name}</span>{' '}
             <span className="text-accent-2">are now friends ✓</span>
@@ -184,12 +187,12 @@ function InviteCard({
         <div className="min-w-0 flex-1">
           <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-accent">
             {isInvite
-              ? '● Room invite'
+              ? 'Room invite'
               : isChallenge
-                ? '● Duel challenge'
+                ? 'Duel challenge'
                 : friendAccepted
-                  ? '● Friends'
-                  : '● Friend request'}
+                  ? 'Friends'
+                  : 'Friend request'}
           </p>
           <p className="mt-1 text-[14px] font-semibold leading-snug">
             <span className="text-ink">{fromName}</span>{' '}

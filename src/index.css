@@ -95,6 +95,113 @@ html.lenis body {
   .animate-win-card { animation: none; }
 }
 
+/* Chat code-snippet syntax highlighting (highlight.js tokens), scoped to the dark code card. Warm
+   palette tuned to the parchment-dark espresso card: terracotta keywords, green strings, gold
+   numbers/functions, muted comments. */
+.coduel-code .hljs-keyword,
+.coduel-code .hljs-built_in,
+.coduel-code .hljs-tag,
+.coduel-code .hljs-name,
+.coduel-code .hljs-selector-tag { color: #cb5b45; }
+.coduel-code .hljs-string,
+.coduel-code .hljs-regexp,
+.coduel-code .hljs-symbol,
+.coduel-code .hljs-bullet,
+.coduel-code .hljs-addition { color: #74b394; }
+.coduel-code .hljs-comment,
+.coduel-code .hljs-quote { color: #a2937c; font-style: italic; }
+.coduel-code .hljs-number,
+.coduel-code .hljs-literal { color: #cba15c; }
+.coduel-code .hljs-title,
+.coduel-code .hljs-title.function_,
+.coduel-code .hljs-section,
+.coduel-code .hljs-attr,
+.coduel-code .hljs-attribute,
+.coduel-code .hljs-property { color: #cba15c; }
+.coduel-code .hljs-type,
+.coduel-code .hljs-class .hljs-title,
+.coduel-code .hljs-params { color: #d9a866; }
+.coduel-code .hljs-meta,
+.coduel-code .hljs-deletion { color: #a2937c; }
+
+/* Light-thread variant — same warm roles tuned for a parchment-light code card (the dark card's
+   palette would wash out on light): terracotta keywords, deep-green strings, dark-gold numbers/titles. */
+.coduel-code-light .hljs-keyword,
+.coduel-code-light .hljs-built_in,
+.coduel-code-light .hljs-tag,
+.coduel-code-light .hljs-name,
+.coduel-code-light .hljs-selector-tag { color: #9e3b2a; }
+.coduel-code-light .hljs-string,
+.coduel-code-light .hljs-regexp,
+.coduel-code-light .hljs-symbol,
+.coduel-code-light .hljs-bullet,
+.coduel-code-light .hljs-addition { color: #2e6b4f; }
+.coduel-code-light .hljs-comment,
+.coduel-code-light .hljs-quote { color: #9a8f78; font-style: italic; }
+.coduel-code-light .hljs-number,
+.coduel-code-light .hljs-literal { color: #a9762a; }
+.coduel-code-light .hljs-title,
+.coduel-code-light .hljs-title.function_,
+.coduel-code-light .hljs-section,
+.coduel-code-light .hljs-attr,
+.coduel-code-light .hljs-attribute,
+.coduel-code-light .hljs-property { color: #a9762a; }
+.coduel-code-light .hljs-type,
+.coduel-code-light .hljs-class .hljs-title,
+.coduel-code-light .hljs-params { color: #8a5a14; }
+.coduel-code-light .hljs-meta,
+.coduel-code-light .hljs-deletion { color: #9a8f78; }
+
+/* Composer emoji picker (emoji-picker-react) re-skinned to the parchment theme via its CSS variables,
+   so it adapts to the per-DM theme too (the tokens resolve inside the themed thread wrapper). */
+.coduel-emoji.EmojiPickerReact {
+  --epr-bg-color: var(--color-paper-2);
+  --epr-category-label-bg-color: var(--color-paper-2);
+  --epr-text-color: var(--color-ink);
+  --epr-hover-bg-color: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  --epr-focus-bg-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  --epr-highlight-color: var(--color-accent);
+  --epr-search-input-bg-color: var(--color-paper);
+  --epr-search-input-bg-color-active: var(--color-paper);
+  --epr-search-input-text-color: var(--color-ink);
+  --epr-search-input-placeholder-color: var(--color-ink-soft);
+  --epr-search-border-color: var(--color-line);
+  --epr-search-border-color-active: var(--color-accent);
+  --epr-search-input-height: 36px;
+  --epr-search-input-padding: 0 2.4rem;
+  --epr-picker-border-color: transparent;
+  --epr-category-icon-active-color: var(--color-accent);
+  --epr-emoji-size: 22px;
+  --epr-emoji-gap: 4px;
+  --epr-header-padding: 12px 14px;
+  --epr-horizontal-padding: 12px;
+  --epr-category-label-height: 28px;
+  --epr-picker-border-radius: 0;
+  --epr-search-input-border-radius: 12px;
+  border: none;
+  font-family: var(--font-sans);
+}
+/* Category labels in the site's mono kicker style. */
+.coduel-emoji .epr-emoji-category-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+/* Search box matches the site's inputs. The input has no stable class (flairup generates it), so
+   target the input inside .epr-search-container directly. */
+.coduel-emoji.EmojiPickerReact,
+.coduel-emoji .epr-search-container input {
+  font-family: var(--font-sans) !important;
+}
+.coduel-emoji .epr-search-container input,
+.coduel-emoji .epr-search-container input::placeholder {
+  font-size: 13px !important;
+}
+.coduel-emoji .epr-emoji-category-content { padding: 2px 0; }
+
 /* Problem statement: Markdown + KaTeX styled to the editorial type system. Tight vertical rhythm,
    quiet code/blocks, math + tables that scroll instead of overflowing on narrow columns. */
 .problem-md {

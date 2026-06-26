@@ -44,8 +44,7 @@ export function ModeCard({ label, title, blurb, tone, icon, featured = false, ch
         >
           {icon}
         </span>
-        <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-ink-soft">
-          <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} />
+        <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink-soft">
           {label}
         </span>
       </div>

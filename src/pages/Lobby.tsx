@@ -106,20 +106,21 @@ export function Lobby() {
 
   return (
     <>
-      <div className="mt-10">
-        <div className="mb-2.5 font-mono text-xs uppercase tracking-[0.18em] text-accent">
-          ● Welcome back, {firstName}
+      {/* hero — scaled down (not removed) on short viewports so the mode cards still fit */}
+      <div className="mt-10 [@media(max-height:780px)]:mt-6">
+        <div className="mb-2.5 font-mono text-xs uppercase tracking-[0.18em] text-accent [@media(max-height:780px)]:mb-1.5">
+          Welcome back, {firstName}
         </div>
-        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[56px] lg:leading-none">
+        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[56px] lg:leading-none [@media(max-height:780px)]:!text-[26px] [@media(max-height:780px)]:!leading-tight">
           Ready to play?
         </h1>
-        <p className="mt-4 max-w-xl text-base text-ink-soft sm:text-lg">
+        <p className="mt-4 max-w-xl text-base text-ink-soft sm:text-lg [@media(max-height:780px)]:!mt-1.5 [@media(max-height:780px)]:!text-[13px]">
           Pick a mode and jump in.
         </p>
       </div>
 
       {/* featured — the two ways to duel */}
-      <Reveal className="mt-10 grid grid-cols-1 items-stretch gap-[22px] md:grid-cols-2">
+      <Reveal className="mt-10 grid grid-cols-1 items-stretch gap-[22px] md:grid-cols-2 [@media(max-height:780px)]:mt-6">
         {featured.map((m) => (
           <ModeCard key={m.id} label={m.label} title={m.title} blurb={m.blurb} tone={m.tone} icon={m.icon} featured>
             <m.Action />
@@ -128,7 +129,7 @@ export function Lobby() {
       </Reveal>
 
       {/* divider into the lighter modes */}
-      <div className="mb-5 mt-12 flex items-center gap-3">
+      <div className="mb-5 mt-12 flex items-center gap-3 [@media(max-height:780px)]:mb-3 [@media(max-height:780px)]:mt-7">
         <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink-soft">
           More ways to play
         </span>

@@ -501,7 +501,7 @@ export function MatchPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-gold">
-                    ● Match over
+                    Match over
                   </div>
                   <p className="font-display text-[22px] font-bold text-gold">You won.</p>
                   <p className="mt-1 text-[13px] text-ink-soft">{winReasonSubtitle()}</p>
@@ -541,7 +541,7 @@ export function MatchPage() {
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <Card className="animate-reveal w-full max-w-md text-center">
             <div className="font-mono text-xs uppercase tracking-[0.18em] text-accent">
-              {ready ? '● Get ready' : '● Match found'}
+              {ready ? 'Get ready' : 'Match found'}
             </div>
             <h2 className="mt-3 font-display text-[28px] font-extrabold leading-tight">
               {ready ? 'Duel starting' : `Waiting for ${opponentName}…`}
@@ -590,7 +590,7 @@ export function MatchPage() {
       {data && isRoom && !started && !matchOver && (
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <Card className="animate-reveal w-full max-w-md text-center">
-            <div className="font-mono text-xs uppercase tracking-[0.18em] text-accent">● Get ready</div>
+            <div className="font-mono text-xs uppercase tracking-[0.18em] text-accent">Get ready</div>
             <h2 className="mt-3 font-display text-[28px] font-extrabold leading-tight">Match starting</h2>
             <p className="mt-2 text-ink-soft">
               {participants.length} players · first to solve it wins.

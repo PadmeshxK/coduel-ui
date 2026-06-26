@@ -36,6 +36,8 @@ export interface FlashToast {
   avatarUrl?: string | null
   // 'friend' = "you're now friends" confirmation; 'dm' = "X messaged you" (clickable → its thread).
   kind: 'friend' | 'dm'
+  // For 'dm': the message kind, so the toast can say what they sent (image/code/problem/text).
+  messageKind?: string | null
   to?: string
 }
 
@@ -114,16 +116,43 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   }, [])
   // Per-sender TTL timers that evict a DM from the bell once its grace window lapses.
   const dmTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-  const { subscribe } = useStomp()
+  const { subscribe, connected } = useStomp()
+
+  // Keys we've already surfaced this session (popped live OR seen in a prior hydrate). The reconnect
+  // catch-up pops a toast only for keys NOT in here — i.e. genuinely published while we were dropped —
+  // so a cold load / plain reload never re-pops invites you've already got sitting in the bell.
+  const surfacedRef = useRef<Set<string>>(new Set())
 
   // Authoritative reload — GET /notification is the full pending set (invites in Redis, requests in
   // DB), so a replace correctly drops anything that's no longer pending (e.g. an accepted request).
-  const refresh = useCallback(() => {
+  // heal=true (a reconnect) pops a toast for anything pending we never surfaced live — self-healing a
+  // push that was dropped during the gap (the broker has no replay), so it doesn't rot in the bell.
+  const reload = useCallback((heal: boolean) => {
     notificationApi
       .getPending()
-      .then((list) => setNotifications(sortCap(list)))
+      .then((list) => {
+        const capped = sortCap(list)
+        setNotifications(capped)
+        if (heal) {
+          // GET /notification IS the definition of a durable, actionable notification — the transient
+          // cues (DMs, accepts/declines, matchmaking) are early-returned in append() and never land
+          // here. So every pending item we haven't surfaced yet is a legit missed push, regardless of
+          // its type. No allowlist → any notification type added later self-heals for free.
+          const missed = capped.filter((n) => !surfacedRef.current.has(notificationKey(n)))
+          if (missed.length > 0) {
+            setLiveKeys((prev) => {
+              const next = new Set(prev)
+              for (const n of missed) next.add(notificationKey(n))
+              return next
+            })
+          }
+        }
+        for (const n of capped) surfacedRef.current.add(notificationKey(n))
+      })
       .catch(() => {})
   }, [])
+
+  const refresh = useCallback(() => reload(false), [reload])
 
   const dismiss = useCallback((n: NotificationData) => {
     const key = notificationKey(n)
@@ -210,6 +239,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           name: incoming.fromDisplayName ?? 'Someone',
           avatarUrl: incoming.fromAvatarUrl,
           kind: 'dm' as const,
+          messageKind: incoming.messageKind,
           to: `/messages/${incoming.fromUserId}`,
         },
       ].slice(-MAX_FLASH))
@@ -230,6 +260,12 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       )
       return
     }
+    // The challenger withdrew a pending challenge — drop its popup/bell row for the challenged user.
+    if (incoming.type === 'CHALLENGE_WITHDRAWN') {
+      const key = `challenge:${incoming.challengeId}`
+      setNotifications((prev) => prev.filter((x) => notificationKey(x) !== key))
+      return
+    }
     // A challenge we sent was declined — signal the challenger's Play card to drop "waiting…". No bell.
     if (incoming.type === 'CHALLENGE_DECLINED') {
       setDeclinedChallenge((prev) => ({
@@ -243,6 +279,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     // Live arrival → eligible for a toast. (refresh()/hydrate sets notifications directly and never
     // touches liveKeys, so reloaded pending items show in the bell but don't re-pop a toast.)
     setLiveKeys((prev) => new Set(prev).add(notificationKey(normalized)))
+    surfacedRef.current.add(notificationKey(normalized)) // a later reconnect won't re-pop this one
     setNotifications((prev) => {
       const byKey = new Map<string, NotificationData>()
       for (const n of [...prev, normalized]) byKey.set(notificationKey(n), n)
@@ -268,6 +305,22 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     })
     return unsubscribe
   }, [user, loading, refresh, append, subscribe])
+
+  // Re-hydrate on reconnect: the broker has no replay, so a notification published during a reconnect
+  // gap is missed live. Re-fetching the pending set recovers the persisted ones (room invites, duel
+  // challenges, friend requests) AND pops a toast for the genuinely-new ones (heal=true) — so a missed
+  // push self-heals into a popup instead of silently rotting in the bell. The FIRST connect is skipped:
+  // the live subscription is freshly in place and the cold-load hydrate already filled the bell, so
+  // there's nothing to heal (and we must not re-pop your existing pending invites on open/reload).
+  const hadConnectedRef = useRef(false)
+  useEffect(() => {
+    if (loading || !user || !connected) return
+    if (!hadConnectedRef.current) {
+      hadConnectedRef.current = true
+      return
+    }
+    reload(true)
+  }, [connected, user, loading, reload])
 
   return (
     <NotificationsContext.Provider

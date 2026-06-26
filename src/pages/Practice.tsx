@@ -97,9 +97,9 @@ export function Practice() {
 
   return (
     <>
-      <div className="mb-7 mt-10">
-        <div className="mb-2.5 font-mono text-xs uppercase tracking-[0.18em] text-accent">● Practice</div>
-        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[54px] lg:leading-none">
+      <div className="mb-7 mt-10 [@media(max-height:780px)]:mb-2 [@media(max-height:780px)]:mt-6">
+        <div className="mb-2.5 font-mono text-xs uppercase tracking-[0.18em] text-accent [@media(max-height:780px)]:hidden">Practice</div>
+        <h1 className="font-display text-[34px] font-extrabold leading-[1.05] tracking-[-0.035em] sm:text-[44px] lg:text-[54px] lg:leading-none [@media(max-height:780px)]:!text-[24px] [@media(max-height:780px)]:!leading-tight">
           Problem set
         </h1>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -260,7 +260,7 @@ export function Practice() {
                     </span>
                   ) : (
                     <span className="w-6 shrink-0 text-center font-mono text-[13px] text-ink-soft/70">
-                      {String(i + 1).padStart(2, '0')}
+                      {String(page * pageSize + i + 1).padStart(2, '0')}
                     </span>
                   )}
 

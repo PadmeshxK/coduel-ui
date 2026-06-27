@@ -143,6 +143,11 @@ export const chatApi = {
     http
       .get<MessageData[]>(`/chat/conversations/${conversationId}/messages`, { params: { before, size } })
       .then((r) => r.data),
+  // The next NEWER page after a messageId (oldest-first) — for the windowed scroll-down.
+  messagesAfter: (conversationId: number, after: number, size = 30) =>
+    http
+      .get<MessageData[]>(`/chat/conversations/${conversationId}/messages`, { params: { after, size } })
+      .then((r) => r.data),
   // Send a DM to a friend → the persisted message (also pushed live to the recipient). opts carries the
   // reply target and/or a CODE kind + language.
   send: (

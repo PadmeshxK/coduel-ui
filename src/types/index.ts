@@ -261,6 +261,10 @@ export interface MessageData {
   attachmentUrl: string | null
   sharedRef: string | null
   durationMs: number | null
+  // Client-only: a stable key across the optimistic→sent swap (so the bubble never remounts), and a
+  // "still sending" flag that dims the bubble until the server confirms it.
+  clientId?: string
+  pending?: boolean
 }
 
 /** GET /chat/search — a message hit with the thread (other participant) it belongs to. */

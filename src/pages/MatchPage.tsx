@@ -78,7 +78,14 @@ export function MatchPage() {
     if ((!ready && !isRoom) || started || ended) return
     setCountdown(3)
     const id = window.setInterval(() => {
-      setCountdown((c) => (c === null ? null : c <= 1 ? 0 : c - 1))
+      setCountdown((c) => {
+        if (c === null) return null
+        if (c <= 1) {
+          clearInterval(id) // reached 0 → stop ticking (it otherwise fired every 1s forever)
+          return 0
+        }
+        return c - 1
+      })
     }, 1000)
     return () => clearInterval(id)
   }, [ready, isRoom, started, ended])
@@ -137,9 +144,13 @@ export function MatchPage() {
   const nameFor = (id: number) =>
     participants.find((p) => p.userId === id)?.displayName ?? 'player'
 
-  // "Back to lobby" returns room games to their room; matchmaking duels go home.
+  // "Back to lobby" returns room games to their room; matchmaking duels go home. roomId is read via a
+  // ref so the match-end timer always uses the latest value — a terminal state can arrive before
+  // useAsync resolves `data`, and a stale closure would send a room game home instead of to its room.
+  const roomIdRef = useRef<number | null>(null)
+  roomIdRef.current = data?.match.roomId ?? null
   const backToLobby = () =>
-    navigate(data?.match.roomId != null ? `/room/${data.match.roomId}` : '/', { replace: true })
+    navigate(roomIdRef.current != null ? `/room/${roomIdRef.current}` : '/', { replace: true })
 
   const youWon = ended && winnerUserId != null && winnerUserId === user?.id
 

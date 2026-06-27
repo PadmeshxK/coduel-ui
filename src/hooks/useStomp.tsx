@@ -100,7 +100,20 @@ export function StompProvider({ children }: { children: ReactNode }) {
     return () => {
       connectedRef.current = false
       setConnected(false)
-      for (const reg of regs.current.values()) reg.sub = undefined
+      // Explicitly tear down each live subscription, then null its handle. Without the unsubscribe the
+      // broker-side subs are only dropped by deactivate(); nulling the handle lets a still-mounted
+      // consumer re-subscribe on the next connect (self-heal) while leaving no zombie behind after a
+      // full logout→login cycle. (Unmounted consumers have already removed their own registration.)
+      for (const reg of regs.current.values()) {
+        if (reg.sub) {
+          try {
+            reg.sub.unsubscribe()
+          } catch {
+            // socket already gone — nothing to clean up
+          }
+        }
+        reg.sub = undefined
+      }
       void client.deactivate()
       clientRef.current = null
     }

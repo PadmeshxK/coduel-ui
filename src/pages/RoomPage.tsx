@@ -90,6 +90,13 @@ export function RoomPage() {
     setWaitingForMatch(false)
   }
 
+  // resolveRoom closes over `user` (and navigate); the room/reconnect subscriptions are keyed only by
+  // roomId, so if `user` resolves AFTER they first run they'd keep routing with user===undefined and
+  // park a live player in waitingForMatch. Route every async caller through a ref that always holds the
+  // latest resolveRoom (same pattern as useMatchSocket's onEvent ref) — no resubscribe churn.
+  const resolveRoomRef = useRef(resolveRoom)
+  resolveRoomRef.current = resolveRoom
+
   // ---- load ----
   useEffect(() => {
     let activeLoad = true
@@ -102,7 +109,7 @@ export function RoomPage() {
     roomApi
       .get(roomId)
       .then((data) => {
-        if (activeLoad) void resolveRoom(data)
+        if (activeLoad) void resolveRoomRef.current(data)
       })
       .catch((e) => activeLoad && setError(e instanceof Error ? e.message : 'Failed to load room'))
       .finally(() => activeLoad && setLoading(false))
@@ -123,7 +130,7 @@ export function RoomPage() {
       try {
         const e = JSON.parse(body) as RoomEventData
         if (e.type === 'ROSTER_CHANGED') {
-          void roomApi.get(roomId).then(resolveRoom).catch(() => {})
+          void roomApi.get(roomId).then((d) => resolveRoomRef.current(d)).catch(() => {})
         } else if (e.type === 'MATCH_STARTED' && e.matchId) {
           navigate(`/match/${e.matchId}`)
         } else if (e.type === 'ROOM_CLOSED') {
@@ -144,7 +151,7 @@ export function RoomPage() {
   useEffect(() => {
     if (!connected) return
     if (hadConnectedRef.current && !leavingRef.current) {
-      void roomApi.get(roomId).then(resolveRoom).catch(() => {})
+      void roomApi.get(roomId).then((d) => resolveRoomRef.current(d)).catch(() => {})
     }
     hadConnectedRef.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,7 +214,7 @@ export function RoomPage() {
   useEffect(() => {
     if (!waitingForMatch) return
     const t = setInterval(() => {
-      void roomApi.get(roomId).then(resolveRoom).catch(() => {})
+      void roomApi.get(roomId).then((d) => resolveRoomRef.current(d)).catch(() => {})
     }, 3000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps

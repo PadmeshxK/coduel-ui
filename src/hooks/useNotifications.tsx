@@ -45,8 +45,6 @@ const MAX_NOTIFICATIONS = 20
 const FRIEND_CONFIRM_MS = 2000
 // Cap stacked flash toasts (DM / "now friends") so spamming can't bury the screen — keep the latest few.
 const MAX_FLASH = 3
-// How long a DM lingers in the bell after its toast — a grace window so a missed toast isn't lost.
-const DM_BELL_TTL_MS = 12_000
 
 const sortCap = (list: NotificationData[]): NotificationData[] =>
   [...list]
@@ -111,11 +109,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const [matchmakingFound, setMatchmakingFound] = useState<{ matchId: number; tick: number } | null>(null)
   // Which DM thread is open (ref, not state — it only gates toast suppression, never triggers a render).
   const activeDmRef = useRef<number | null>(null)
+  // Opening a thread = reading it: drop that sender's DM bell row immediately (the server clears its
+  // inbox entry via markRead too, so it stays gone after a reload).
   const setActiveDm = useCallback((userId: number | null) => {
     activeDmRef.current = userId
+    if (userId != null) {
+      setNotifications((prev) => prev.filter((n) => notificationKey(n) !== `dm:${userId}`))
+    }
   }, [])
-  // Per-sender TTL timers that evict a DM from the bell once its grace window lapses.
-  const dmTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const { subscribe, connected } = useStomp()
 
   // Keys we've already surfaced this session (popped live OR seen in a prior hydrate). The reconnect
@@ -227,8 +228,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       return
     }
     // A DM arrived — suppress entirely while we're reading that exact thread (the /user/queue/dm stream
-    // is already updating the open view). Otherwise pop a transient toast AND drop a bell row that
-    // lingers for a grace window (DM_BELL_TTL_MS) so a missed toast isn't lost, then evicts itself.
+    // is already updating the open view). Otherwise pop a transient toast AND keep a bell row that
+    // PERSISTS until the thread is read (one row per sender, refreshed by later DMs) — the server inbox
+    // mirrors it, so it also survives a reload.
     if (incoming.type === 'DM_RECEIVED') {
       if (activeDmRef.current === incoming.fromUserId) return
       const dm = { ...incoming, createdAtMs: incoming.createdAtMs ?? Date.now() }
@@ -243,21 +245,11 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           to: `/messages/${incoming.fromUserId}`,
         },
       ].slice(-MAX_FLASH))
-      const key = notificationKey(dm)
       setNotifications((prev) => {
         const byKey = new Map<string, NotificationData>()
         for (const n of [...prev, dm]) byKey.set(notificationKey(n), n)
         return sortCap([...byKey.values()])
       })
-      const existing = dmTimers.current.get(key)
-      if (existing) clearTimeout(existing)
-      dmTimers.current.set(
-        key,
-        setTimeout(() => {
-          setNotifications((prev) => prev.filter((n) => notificationKey(n) !== key))
-          dmTimers.current.delete(key)
-        }, DM_BELL_TTL_MS),
-      )
       return
     }
     // The challenger withdrew a pending challenge — drop its popup/bell row for the challenged user.

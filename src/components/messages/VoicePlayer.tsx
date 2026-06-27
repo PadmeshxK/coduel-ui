@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 const BAR_COUNT = 75
 
@@ -40,13 +40,19 @@ export function VoicePlayer({
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [cur, setCur] = useState(0)
+  // Resolved element duration once metadata loads — held in state so the waveform/clock/seek work
+  // before the first play (a render-time read of audioRef never updates). webm-from-MediaRecorder
+  // reports Infinity until seeked, so we fall back to the known durationMs prop until a finite value lands.
+  const [elDur, setElDur] = useState<number | null>(null)
   const heights = useMemo(() => waveformBars(seed), [seed])
 
-  // Prefer the real element duration once known; fall back to the stored ms (Infinity guards the
-  // webm-from-MediaRecorder quirk where duration is Infinity until the clip is seeked).
-  const elDur = audioRef.current?.duration
-  const total = elDur && isFinite(elDur) && elDur > 0 ? elDur : (durationMs ?? 0) / 1000
+  const total = elDur && elDur > 0 ? elDur : (durationMs ?? 0) / 1000
   const progress = total > 0 ? Math.min(1, cur / total) : 0
+
+  const onDuration = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const d = e.currentTarget.duration
+    if (isFinite(d) && d > 0) setElDur(d)
+  }
 
   const toggle = () => {
     const el = audioRef.current
@@ -64,28 +70,28 @@ export function VoicePlayer({
     setCur(frac * total)
   }
 
-  // Pointer drag scrubbing: seek on press, follow the finger/mouse while held (pointer capture so the
-  // drag keeps tracking even if it leaves the bar), release on up.
+  // Pointer drag scrubbing: seek on press, follow the finger/mouse while held, release on up. Listeners
+  // live on window (so the drag tracks even past the bar) and their handles are kept in a ref so an
+  // unmount mid-scrub can tear them down (see the cleanup effect below) — otherwise they'd leak.
+  const dragRef = useRef<{ move: (ev: PointerEvent) => void; up: (ev: PointerEvent) => void } | null>(null)
   const onBarPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const bar = e.currentTarget
-    bar.setPointerCapture(e.pointerId)
-    const rect = bar.getBoundingClientRect()
+    const rect = e.currentTarget.getBoundingClientRect()
     seekToClientX(e.clientX, rect)
-    const onMove = (ev: PointerEvent) => seekToClientX(ev.clientX, rect)
-    const onUp = (ev: PointerEvent) => {
-      bar.removeEventListener('pointermove', onMove)
-      bar.removeEventListener('pointerup', onUp)
-      bar.removeEventListener('pointercancel', onUp)
-      try {
-        bar.releasePointerCapture(ev.pointerId)
-      } catch {
-        // pointer already released
-      }
+    const move = (ev: PointerEvent) => seekToClientX(ev.clientX, rect)
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      dragRef.current = null
     }
-    bar.addEventListener('pointermove', onMove)
-    bar.addEventListener('pointerup', onUp)
-    bar.addEventListener('pointercancel', onUp)
+    dragRef.current = { move, up }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
   }
+
+  // Tear down an in-progress scrub if the bubble unmounts mid-drag.
+  useEffect(() => () => dragRef.current?.up(new PointerEvent('pointerup')), [])
 
   const base = onAccent ? 'bg-white/35' : 'bg-ink-soft/30'
   const fill = onAccent ? 'bg-white' : 'bg-accent'
@@ -124,6 +130,8 @@ export function VoicePlayer({
         ref={audioRef}
         src={src}
         preload="metadata"
+        onLoadedMetadata={onDuration}
+        onDurationChange={onDuration}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onTimeUpdate={(e) => setCur(e.currentTarget.currentTime)}

@@ -55,6 +55,11 @@ import type {
 const GROUP_MS = 5 * 60 * 1000;
 // A message can only be edited within this window of being sent (mirrors the backend's 5 min).
 const EDIT_WINDOW_MS = 5 * 60 * 1000;
+// Thread page size (per history page). A full page means more history may exist in that direction.
+const PAGE_SIZE = 50;
+// Generous in-memory message window — enough that you rarely hit an edge, small enough the DOM never
+// lags. Beyond this, the far end is dropped from memory and refetched if you scroll back to it.
+const MAX_MESSAGES = 300;
 // Languages offered for a code snippet (display label only — execution is a later slice).
 const CODE_LANGS = ["Python", "JavaScript", "TypeScript", "Java", "C++", "C", "Go", "Rust", "SQL", "Bash", "JSON", "HTML", "Plain text"];
 
@@ -131,6 +136,18 @@ function writeCachedSettings(userId: number, s: ConversationSettingData): void {
   }
 }
 
+// Stable client-side id for an optimistic message — its React key never changes across the
+// optimistic→sent swap, so the bubble updates in place (dim → solid) instead of remounting.
+function newClientId(): string {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `c-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+}
+
+// Monotonic counter for optimistic-message ids (negative) — a wall-clock -Date.now() collides on rapid
+// multi-send, breaking id-keyed lookups; a counter never does.
+let tempIdCounter = 0;
+
 // Rating → tone, mirroring the Practice list so difficulty reads the same in the share picker.
 function ratingTone(rating: number): string {
   if (rating < 1200) return "text-accent-2 border-accent-2/40";
@@ -192,6 +209,14 @@ export function Messages() {
   const [friends, setFriends] = useState<FriendData[]>([]);
   const [conversations, setConversations] = useState<ConversationData[]>([]);
   const [messages, setMessages] = useState<MessageData[]>([]);
+  // Windowed history pagination — load older (scroll up) / newer (scroll down) and trim the far side so
+  // the in-memory window stays bounded. hasMoreNewer becomes true once we've trimmed the newest end.
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [hasMoreNewer, setHasMoreNewer] = useState(false);
+  const loadingOlderRef = useRef(false); // synchronous re-entry guards (scroll fires faster than state)
+  const loadingNewerRef = useRef(false);
+  // Scroll anchor for keeping the viewport on the same message across a prepend/append/trim.
+  const scrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
   const [loadingThread, setLoadingThread] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -204,8 +229,6 @@ export function Messages() {
   const [msgPage, setMsgPage] = useState(0);
   const [msgTotalPages, setMsgTotalPages] = useState(0);
   const [msgSearching, setMsgSearching] = useState(false);
-  // True once a search jump loaded an older history window — so "jump to latest" reloads the newest page.
-  const [viewingHistory, setViewingHistory] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchResultsRef = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
@@ -268,7 +291,7 @@ export function Messages() {
   // Run-from-chat: per-code-message sandbox output + which are running; runId → messageId correlation.
   const [runOutputs, setRunOutputs] = useState<Record<number, ExecutionData>>({});
   const [runningIds, setRunningIds] = useState<Set<number>>(new Set());
-  const pendingRunsRef = useRef<Map<string, number>>(new Map());
+  const pendingRunsRef = useRef<Map<string, { messageId: number; convId: number | null }>>(new Map());
   const [menuOpen, setMenuOpen] = useState(false); // drives the menu's in/out animation while mounted
   // Composer attachment (reply preview / edit banner) kept mounted across close so it can animate OUT.
   const [heldAttach, setHeldAttach] = useState<{ kind: "edit" | "reply" | "code"; message: MessageData | null } | null>(null);
@@ -310,6 +333,9 @@ export function Messages() {
     .toUpperCase();
   const activeConvIdRef = useRef<number | null>(null);
   activeConvIdRef.current = activeConversationId;
+  // Latest hasMoreNewer for use inside socket callbacks (which close over a stale render otherwise).
+  const hasMoreNewerRef = useRef(false);
+  hasMoreNewerRef.current = hasMoreNewer;
   const activeUserIdRef = useRef<number | null>(null);
   activeUserIdRef.current = activeUserId;
 
@@ -323,6 +349,9 @@ export function Messages() {
   // after, so subsequent message appends only smooth-follow. Reliable even when reopening the SAME
   // thread (a plain id-compare missed that, causing a visible scroll-from-top on reopen).
   const freshLoadRef = useRef(false);
+  // False until the thread has loaded + landed at the bottom — gates history prefetch so the open
+  // sequence (Lenis briefly reporting scrollTop 0) can't spuriously pull older messages.
+  const threadReadyRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Typing-indicator plumbing: throttle outgoing signals; auto-clear the incoming "typing…" after a pause.
   const lastTypingSentRef = useRef(0);
@@ -362,7 +391,97 @@ export function Messages() {
     if (menuId !== null) closeMenu();
     const dist = w.scrollHeight - w.scrollTop - w.clientHeight;
     nearBottomRef.current = dist < 220;
-    setShowJump(dist > 320);
+    setShowJump(dist > 320 || hasMoreNewer); // also offer "jump to latest" while in a history window
+    if (!threadReadyRef.current) return; // ignore the open-sequence scroll churn
+    // Prefetch ~a screen ahead of either edge so windowed scrolling feels seamless.
+    if (w.scrollTop < 600) loadOlder();
+    if (dist < 600 && hasMoreNewer) loadNewer();
+  }
+
+  // Record the message at the top of the viewport + its screen position, so we can restore it after the
+  // list mutates (prepend / append / trim) and the viewport stays put — no jump.
+  function captureAnchor() {
+    const w = threadRef.current;
+    if (!w) return;
+    const top = w.getBoundingClientRect().top;
+    const nodes = w.querySelectorAll<HTMLElement>("[data-message-id]");
+    for (const el of nodes) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > top + 8) {
+        scrollAnchorRef.current = { id: el.dataset.messageId ?? "", top: r.top };
+        return;
+      }
+    }
+    scrollAnchorRef.current = null;
+  }
+
+  // Load the previous (older) page and prepend it; trim the newest end if the window overflows.
+  function loadOlder() {
+    const convId = activeConvIdRef.current;
+    const oldest = messages[0];
+    if (convId == null || loadingOlderRef.current || !hasMoreOlder || !oldest || oldest.messageId < 0) {
+      return;
+    }
+    loadingOlderRef.current = true;
+    chatApi
+      .messages(convId, oldest.messageId, PAGE_SIZE)
+      .then((page) => {
+        if (activeConvIdRef.current !== convId) return; // thread switched mid-fetch — discard
+        const older = [...page].reverse();
+        if (older.length === 0) {
+          setHasMoreOlder(false);
+          return;
+        }
+        setHasMoreOlder(older.length >= PAGE_SIZE);
+        captureAnchor();
+        setMessages((prev) => {
+          const seen = new Set(prev.map((m) => m.messageId));
+          let next = [...older.filter((m) => !seen.has(m.messageId)), ...prev];
+          if (next.length > MAX_MESSAGES) {
+            next = next.slice(0, MAX_MESSAGES); // drop the newest tail (far from view) — refetch on scroll-down
+            setHasMoreNewer(true);
+          }
+          return next;
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        loadingOlderRef.current = false;
+      });
+  }
+
+  // Load the next (newer) page and append it; trim the oldest end if the window overflows.
+  function loadNewer() {
+    const convId = activeConvIdRef.current;
+    const newest = messages[messages.length - 1];
+    if (convId == null || loadingNewerRef.current || !hasMoreNewer || !newest || newest.messageId < 0) {
+      return;
+    }
+    loadingNewerRef.current = true;
+    chatApi
+      .messagesAfter(convId, newest.messageId, PAGE_SIZE)
+      .then((newer) => {
+        if (activeConvIdRef.current !== convId) return; // thread switched mid-fetch — discard
+        if (newer.length === 0) {
+          setHasMoreNewer(false);
+          return;
+        }
+        setHasMoreNewer(newer.length >= PAGE_SIZE);
+        captureAnchor();
+        setMessages((prev) => {
+          const seen = new Set(prev.map((m) => m.messageId));
+          let next = [...prev, ...newer.filter((m) => !seen.has(m.messageId))];
+          if (next.length > MAX_MESSAGES) {
+            next = next.slice(next.length - MAX_MESSAGES); // drop the oldest head — refetch on scroll-up
+            setHasMoreOlder(true);
+          }
+          return next;
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        loadingNewerRef.current = false;
+      });
   }
 
   const reloadConversations = () =>
@@ -437,10 +556,12 @@ export function Messages() {
     }
     if (convId == null) return;
     chatApi
-      .messages(convId, messageId + 1, 30)
+      .messages(convId, messageId + 1, PAGE_SIZE)
       .then((page) => {
+        if (activeConvIdRef.current !== convId) return; // thread switched mid-fetch — discard
         setMessages([...page].reverse());
-        setViewingHistory(true);
+        setHasMoreOlder(page.length >= PAGE_SIZE);
+        setHasMoreNewer(true); // there are newer messages after the match (loadNewer corrects if not)
         freshLoadRef.current = false;
         // double rAF: wait for the window to render before scrolling to the match
         requestAnimationFrame(() => requestAnimationFrame(() => scrollToMessage(messageId)));
@@ -448,16 +569,18 @@ export function Messages() {
       .catch(() => {});
   }
 
-  // Jump to latest — reload the newest page first if we'd scrolled into a search-loaded history window.
+  // Jump to latest — if we're in a history window (newer messages not loaded), reload the newest page
+  // first; otherwise just smooth-scroll to the bottom of the loaded window.
   function jumpToLatest() {
     const convId = activeConvIdRef.current;
-    if (viewingHistory && convId != null) {
+    if (hasMoreNewer && convId != null) {
       freshLoadRef.current = true;
       chatApi
-        .messages(convId)
+        .messages(convId, undefined, PAGE_SIZE)
         .then((page) => {
           setMessages([...page].reverse());
-          setViewingHistory(false);
+          setHasMoreOlder(page.length >= PAGE_SIZE);
+          setHasMoreNewer(false);
         })
         .catch(() => {});
     } else {
@@ -576,7 +699,13 @@ export function Messages() {
     setDeclinedMsgId(null);
     setSearchOpen(false);
     setSearchQuery("");
-    setViewingHistory(false);
+    // Reset windowed pagination for the new thread.
+    setHasMoreOlder(false);
+    setHasMoreNewer(false);
+    loadingOlderRef.current = false;
+    loadingNewerRef.current = false;
+    scrollAnchorRef.current = null;
+    threadReadyRef.current = false; // re-armed after the new thread lands at the bottom
     // Abandon any in-progress / unsent voice recording when switching threads.
     voice.cancel();
     setRecordedVoice((prev) => {
@@ -587,8 +716,12 @@ export function Messages() {
     freshLoadRef.current = true; // the next non-empty messages render is a fresh thread → instant jump
     reloadPins(convId); // shared pins load alongside the thread
     chatApi
-      .messages(convId)
-      .then((page) => setMessages([...page].reverse()))
+      .messages(convId, undefined, PAGE_SIZE)
+      .then((page) => {
+        setMessages([...page].reverse());
+        setHasMoreOlder(page.length >= PAGE_SIZE); // a full page → older history likely exists
+        setHasMoreNewer(false); // opening lands at the latest — nothing newer to load
+      })
       .catch(() => setMessages([]))
       .finally(() => {
         setLoadingThread(false);
@@ -608,7 +741,8 @@ export function Messages() {
         const msg = JSON.parse(body) as MessageData;
         if (
           activeConvIdRef.current &&
-          msg.conversationId === activeConvIdRef.current
+          msg.conversationId === activeConvIdRef.current &&
+          !hasMoreNewerRef.current // if scrolled up in a history window, don't append out of context
         ) {
           setMessages((prev) => [...prev, msg]);
           setTyping(false); // their message landed — they're no longer typing
@@ -710,9 +844,12 @@ export function Messages() {
       try {
         const data = JSON.parse(body) as ExecutionData;
         if (!data.runId) return;
-        const messageId = pendingRunsRef.current.get(data.runId);
-        if (messageId === undefined) return;
+        const pending = pendingRunsRef.current.get(data.runId);
+        if (pending === undefined) return;
         pendingRunsRef.current.delete(data.runId);
+        // Drop a result that belongs to a thread we've since left — it must not paint onto the open one.
+        if (pending.convId !== activeConvIdRef.current) return;
+        const messageId = pending.messageId;
         setRunOutputs((prev) => ({ ...prev, [messageId]: data }));
         setRunningIds((prev) => {
           const next = new Set(prev);
@@ -734,9 +871,14 @@ export function Messages() {
     if (hadConnectedRef.current) {
       const convId = activeConvIdRef.current;
       if (convId) {
+        // Re-sync to the latest page (a reconnect re-anchors the window at the newest messages).
         void chatApi
-          .messages(convId)
-          .then((page) => setMessages([...page].reverse()))
+          .messages(convId, undefined, PAGE_SIZE)
+          .then((page) => {
+            setMessages([...page].reverse());
+            setHasMoreOlder(page.length >= PAGE_SIZE);
+            setHasMoreNewer(false);
+          })
           .catch(() => {});
         reloadPins(convId);
       }
@@ -930,9 +1072,31 @@ export function Messages() {
   // useLayoutEffect → runs before paint, so the thread never flashes at the top first.
   useLayoutEffect(() => {
     if (messages.length === 0) return;
+    const w = threadRef.current;
+    // Just paged history (prepend / append / trim) → keep the anchored message at the same screen
+    // position. Takes precedence over the fresh-load / follow-bottom behaviour below.
+    if (scrollAnchorRef.current && w) {
+      const a = scrollAnchorRef.current;
+      scrollAnchorRef.current = null;
+      const el = w.querySelector<HTMLElement>(`[data-message-id="${a.id}"]`);
+      if (el) {
+        const delta = el.getBoundingClientRect().top - a.top;
+        if (delta !== 0) {
+          w.scrollTop += delta;
+          threadLenis.current?.resize();
+          threadLenis.current?.scrollTo(w.scrollTop, { immediate: true });
+        }
+      }
+      return;
+    }
     if (freshLoadRef.current) {
       freshLoadRef.current = false;
       scrollToLatest(true); // fresh thread (open or reopen) → instant jump, no visible scroll
+      // Enable history prefetch only after we've settled at the bottom (next frame), so the open
+      // sequence doesn't trip loadOlder.
+      requestAnimationFrame(() => {
+        threadReadyRef.current = true;
+      });
     } else if (nearBottomRef.current) {
       scrollToLatest(false); // a new message in the open thread → smooth follow
     }
@@ -992,7 +1156,8 @@ export function Messages() {
     const isCode = codeMode;
     setReplyingTo(null);
     setCodeMode(false);
-    const tempId = -Date.now();
+    const tempId = -(++tempIdCounter);
+    const clientId = newClientId();
     const optimistic: MessageData = {
       messageId: tempId,
       conversationId: activeConversationId ?? 0,
@@ -1011,6 +1176,8 @@ export function Messages() {
       attachmentUrl: null,
       sharedRef: null,
       durationMs: null,
+      clientId,
+      pending: true,
     };
     setMessages((prev) => [...prev, optimistic]);
     nearBottomRef.current = true;
@@ -1021,11 +1188,12 @@ export function Messages() {
         kind: isCode ? "CODE" : "TEXT",
         codeLanguage: isCode ? codeLang : null,
       });
-      setMessages((prev) => prev.map((m) => (m.messageId === tempId ? msg : m)));
+      // Update in place (keep clientId → same key → no remount); pending clears → dim fades to solid.
+      setMessages((prev) => prev.map((m) => (m.clientId === clientId ? { ...msg, clientId } : m)));
       void reloadConversations();
     } catch {
       // send failed — drop the optimistic bubble, restore the text + reply/code context so nothing is lost
-      setMessages((prev) => prev.filter((m) => m.messageId !== tempId));
+      setMessages((prev) => prev.filter((m) => m.clientId !== clientId));
       setInput(text);
       setReplyingTo(replyTarget);
       if (isCode) setCodeMode(true);
@@ -1051,13 +1219,22 @@ export function Messages() {
     );
     const call = removing ? chatApi.unreact(messageId) : chatApi.react(messageId, emoji);
     void call.catch(() => {
-      // reconcile from the server on failure
+      // Reconcile on failure. A full-page refetch is only safe when pinned to the latest page — inside a
+      // history window it would discard the loaded older/newer window, so just revert the change in place.
       const convId = activeConvIdRef.current;
-      if (convId) {
+      if (convId && !hasMoreNewerRef.current) {
         void chatApi
           .messages(convId)
           .then((page) => setMessages([...page].reverse()))
           .catch(() => {});
+      } else {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.messageId === messageId
+              ? { ...m, reactions: withReaction(m.reactions, me, mineNow ?? null) }
+              : m,
+          ),
+        );
       }
     });
   }
@@ -1208,7 +1385,8 @@ export function Messages() {
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     const previewUrl = URL.createObjectURL(file); // local, instant — no round-trip
-    const tempId = -Date.now();
+    const tempId = -(++tempIdCounter);
+    const clientId = newClientId();
     const optimistic: MessageData = {
       messageId: tempId,
       conversationId: activeConversationId ?? 0,
@@ -1227,6 +1405,8 @@ export function Messages() {
       attachmentUrl: previewUrl,
       sharedRef: null,
       durationMs: null,
+      clientId,
+      pending: true,
     };
     setMessages((prev) => [...prev, optimistic]);
     nearBottomRef.current = true;
@@ -1238,12 +1418,14 @@ export function Messages() {
         kind: "IMAGE",
         attachmentUrl: url,
       });
-      setMessages((prev) => prev.map((m) => (m.messageId === tempId ? msg : m)));
-      URL.revokeObjectURL(previewUrl);
+      // Keep the local blob URL on the confirmed message so the image doesn't re-fetch/flash on swap.
+      setMessages((prev) =>
+        prev.map((m) => (m.clientId === clientId ? { ...msg, clientId, attachmentUrl: previewUrl } : m)),
+      );
       void reloadConversations();
     } catch {
       // upload/send failed — drop the optimistic bubble and restore the caption + reply context
-      setMessages((prev) => prev.filter((m) => m.messageId !== tempId));
+      setMessages((prev) => prev.filter((m) => m.clientId !== clientId));
       URL.revokeObjectURL(previewUrl);
       setInput(caption);
       setReplyingTo(replyTarget);
@@ -1277,7 +1459,8 @@ export function Messages() {
     if (!recordedVoice || activeUserId == null || sendingVoice) return;
     const clip = recordedVoice;
     setRecordedVoice(null);
-    const tempId = -Date.now();
+    const tempId = -(++tempIdCounter);
+    const clientId = newClientId();
     const optimistic: MessageData = {
       messageId: tempId,
       conversationId: activeConversationId ?? 0,
@@ -1294,6 +1477,8 @@ export function Messages() {
       attachmentUrl: clip.url,
       sharedRef: null,
       durationMs: clip.durationMs,
+      clientId,
+      pending: true,
     };
     setMessages((prev) => [...prev, optimistic]);
     nearBottomRef.current = true;
@@ -1305,12 +1490,14 @@ export function Messages() {
         attachmentUrl: url,
         durationMs: clip.durationMs,
       });
-      setMessages((prev) => prev.map((m) => (m.messageId === tempId ? msg : m)));
-      URL.revokeObjectURL(clip.url);
+      // Keep the local blob URL so playback doesn't re-fetch/flash on the swap (in place — same key).
+      setMessages((prev) =>
+        prev.map((m) => (m.clientId === clientId ? { ...msg, clientId, attachmentUrl: clip.url } : m)),
+      );
       void reloadConversations();
     } catch {
       // Send failed — drop the optimistic bubble but KEEP the clip (fresh url) so the user can retry.
-      setMessages((prev) => prev.filter((m) => m.messageId !== tempId));
+      setMessages((prev) => prev.filter((m) => m.clientId !== clientId));
       URL.revokeObjectURL(clip.url);
       setRecordedVoice({ url: URL.createObjectURL(clip.blob), blob: clip.blob, durationMs: clip.durationMs });
     } finally {
@@ -1374,7 +1561,7 @@ export function Messages() {
     executionApi
       .execute({ language: lang, code: message.body, testCases: [{ input: stdin, expectedOutput: "" }] })
       .then(({ runId }) => {
-        pendingRunsRef.current.set(runId, id);
+        pendingRunsRef.current.set(runId, { messageId: id, convId: activeConvIdRef.current });
         setTimeout(() => {
           if (pendingRunsRef.current.has(runId)) {
             pendingRunsRef.current.delete(runId);
@@ -1397,7 +1584,8 @@ export function Messages() {
     const caption = input.trim();
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-    const tempId = -Date.now();
+    const tempId = -(++tempIdCounter);
+    const clientId = newClientId();
     const optimistic: MessageData = {
       messageId: tempId,
       conversationId: activeConversationId ?? 0,
@@ -1416,6 +1604,8 @@ export function Messages() {
       attachmentUrl: null,
       sharedRef: slug,
       durationMs: null,
+      clientId,
+      pending: true,
     };
     setMessages((prev) => [...prev, optimistic]);
     nearBottomRef.current = true;
@@ -1426,10 +1616,10 @@ export function Messages() {
         kind: "PROBLEM_SHARE",
         sharedRef: slug,
       });
-      setMessages((prev) => prev.map((m) => (m.messageId === tempId ? msg : m)));
+      setMessages((prev) => prev.map((m) => (m.clientId === clientId ? { ...msg, clientId } : m)));
       void reloadConversations();
     } catch {
-      setMessages((prev) => prev.filter((m) => m.messageId !== tempId));
+      setMessages((prev) => prev.filter((m) => m.clientId !== clientId));
       setInput(caption);
       setReplyingTo(replyTarget);
     } finally {
@@ -1944,7 +2134,7 @@ export function Messages() {
                           !sameDay(ts(next), ts(m));
                         return (
                           <div
-                            key={m.messageId}
+                            key={m.clientId ?? m.messageId}
                             data-message-id={m.messageId}
                             className={`rounded-2xl transition-colors duration-700 ${
                               flashId === m.messageId ? "bg-accent/10" : ""
@@ -1972,7 +2162,11 @@ export function Messages() {
                                 ) : (
                                   <span className="w-[26px] shrink-0" />
                                 ))}
-                              <div className="relative w-fit max-w-[75%]">
+                              <div
+                                className={`relative w-fit max-w-[75%] transition-opacity duration-300 ease-fluid ${
+                                  m.pending ? "opacity-55" : "opacity-100"
+                                }`}
+                              >
                                 {/* hover quick-react bar: one tap reacts (clear cue, no hidden double-tap);
                                     "more" opens the full palette. */}
                                 {m.messageId >= 0 && reactingId !== m.messageId && (
@@ -2069,14 +2263,16 @@ export function Messages() {
                                     {m.replyTo && (
                                       <button
                                         onClick={() => m.replyTo && scrollToMessage(m.replyTo.messageId)}
-                                        className={`mb-2 flex w-full items-stretch gap-2 overflow-hidden rounded-xl text-left transition ${
+                                        className={`mb-1.5 flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left transition ${
                                           mine
-                                            ? "bg-white/[0.13] hover:bg-white/20"
-                                            : "bg-black/[0.045] hover:bg-black/[0.08] dark:bg-white/[0.07] dark:hover:bg-white/[0.12]"
+                                            ? "bg-white/15 hover:bg-white/25"
+                                            : "bg-accent/[0.08] hover:bg-accent/[0.14]"
                                         }`}
                                       >
-                                        <span className={`w-[3px] shrink-0 ${mine ? "bg-white/70" : "bg-accent"}`} />
-                                        <span className="min-w-0 py-1.5 pr-2.5">
+                                        <span className={`shrink-0 ${mine ? "text-white/80" : "text-accent"}`}>
+                                          <ReplyQuoteIcon />
+                                        </span>
+                                        <span className="min-w-0">
                                           <span
                                             className={`block font-mono text-[9px] uppercase tracking-[0.16em] ${mine ? "text-white/85" : "text-accent"}`}
                                           >
@@ -2175,7 +2371,7 @@ export function Messages() {
                             )}
                             {mine && i === lastReadMineIndex && (
                               <div className="mt-1 flex justify-end px-1">
-                                <span className="inline-flex items-center gap-1 font-mono text-[9.5px] uppercase tracking-[0.13em] text-accent-2">
+                                <span className="animate-reveal inline-flex items-center gap-1 text-[10px] font-medium tracking-tight text-accent-2">
                                   <SeenIcon /> Seen
                                 </span>
                               </div>
@@ -2184,8 +2380,9 @@ export function Messages() {
                               i === lastMineIndex &&
                               lastMineIndex > lastReadMineIndex && (
                                 <div className="mt-1 flex justify-end px-1">
-                                  <span className="font-mono text-[9.5px] uppercase tracking-[0.13em] text-ink-soft/55">
-                                    Sent
+                                  {/* delivered, not yet seen — a single tick, no label (the solid bubble already says "sent") */}
+                                  <span className="animate-reveal text-ink-soft/45" title="Sent">
+                                    <SingleCheckIcon />
                                   </span>
                                 </div>
                               )}
@@ -2621,6 +2818,16 @@ function ReplyIcon() {
   );
 }
 
+// Compact reply glyph for the quoted message above a reply (replaces the generic left bar).
+function ReplyQuoteIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M9 17 4 12l5-5" />
+      <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+    </svg>
+  );
+}
+
 // Pencil — edit a message.
 function EditIcon() {
   return (
@@ -2773,6 +2980,25 @@ function MutedIcon() {
       <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" />
       <path d="M18 8a6 6 0 0 0-9.33-5" />
       <path d="m2 2 20 20" />
+    </svg>
+  );
+}
+
+// Single tick — your latest message is delivered (sent) but not yet seen.
+function SingleCheckIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m5 12.5 5 5L20 6" />
     </svg>
   );
 }

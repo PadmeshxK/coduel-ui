@@ -1094,8 +1094,9 @@ export function Messages() {
             immediate: true,
             force: true,
           });
-          lenis?.start();
-          requestAnimationFrame(() => {isAnchoringRef.current = false;})
+          requestAnimationFrame(() => {
+            lenis?.start();
+            isAnchoringRef.current = false;})
         }
 
       }

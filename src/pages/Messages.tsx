@@ -1082,10 +1082,18 @@ export function Messages() {
       if (el) {
         const delta = el.getBoundingClientRect().top - a.top;
         if (delta !== 0) {
-          w.scrollTop += delta;
-          threadLenis.current?.resize();
-          threadLenis.current?.scrollTo(w.scrollTop, { immediate: true });
+          const lenis = threadLenis.current;
+          const target = w.scrollTop + delta;
+          lenis?.stop();
+          lenis?.resize();
+          w.scrollTop = target;
+          lenis?.scrollTo(target, {
+            immediate: true,
+            force: true,
+          });
+          lenis?.start();
         }
+
       }
       return;
     }

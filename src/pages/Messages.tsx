@@ -1085,13 +1085,16 @@ export function Messages() {
         const delta = el.getBoundingClientRect().top - a.top;
         if (delta !== 0) {
           const lenis = threadLenis.current;
+          const target = w.scrollTop + delta;
           isAnchoringRef.current = true;
+          lenis?.stop();
           lenis?.resize();
-          w.scrollTop += delta;
-          if(lenis){
-            lenis.animatedScroll += delta;
-            lenis.targetScroll += delta;
-          }
+          w.scrollTop = target;
+          lenis?.scrollTo(target, {
+            immediate: true,
+            force: true,
+          });
+          lenis?.start();
           requestAnimationFrame(() => {isAnchoringRef.current = false;})
         }
 

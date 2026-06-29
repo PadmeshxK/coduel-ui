@@ -352,6 +352,7 @@ export function Messages() {
   // False until the thread has loaded + landed at the bottom — gates history prefetch so the open
   // sequence (Lenis briefly reporting scrollTop 0) can't spuriously pull older messages.
   const threadReadyRef = useRef(false);
+  const isAnchoringRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Typing-indicator plumbing: throttle outgoing signals; auto-clear the incoming "typing…" after a pause.
   const lastTypingSentRef = useRef(0);
@@ -387,6 +388,7 @@ export function Messages() {
   function onThreadScroll() {
     const w = threadRef.current;
     if (!w) return;
+    if(isAnchoringRef.current) return;
     if (reactingId !== null) closeReact(); // a scroll dismisses an open reaction picker
     if (menuId !== null) closeMenu();
     const dist = w.scrollHeight - w.scrollTop - w.clientHeight;
@@ -1084,6 +1086,7 @@ export function Messages() {
         if (delta !== 0) {
           const lenis = threadLenis.current;
           const target = w.scrollTop + delta;
+          isAnchoringRef.current = true;
           lenis?.stop();
           lenis?.resize();
           w.scrollTop = target;
@@ -1092,6 +1095,7 @@ export function Messages() {
             force: true,
           });
           lenis?.start();
+          requestAnimationFrame(() => {isAnchoringRef.current = false;})
         }
 
       }
